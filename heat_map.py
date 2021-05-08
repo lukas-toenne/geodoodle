@@ -66,6 +66,7 @@ class HeatMapGenerator:
         B.shape = numedges, 3
         return B
 
+    # UNUSED
     # Per-face Laplacian as defined by
     # ALEXA M., WARDETZKY M.: Discrete Laplacians on general polygonal meshes
     def get_face_laplacian_AW11(face):
@@ -88,17 +89,8 @@ class HeatMapGenerator:
 
         return Mf
 
-    def debug_build_virtual_verts(self, virtual_verts):
-        assert(len(virtual_verts) == len(self.bm.faces))
-        old_faces = list(self.bm.faces)
-        for oface, vv in zip(old_faces, virtual_verts):
-            nvert = self.bm.verts.new(vv)
-            for loop in oface.loops:
-                self.bm.faces.new((nvert, loop.vert, loop.link_loop_next.vert))
-            self.bm.faces.remove(oface)
-
-    def generate(self, boundary_vg, output_vg, time_scale=1.0):
-        # Build Laplacian
+    # Computes mass and stiffness matrices for the mesh
+    def compute_laplacian(self):
         totverts = len(self.bm.verts)
         totfaces = len(self.bm.faces)
         self.bm.verts.index_update()
@@ -147,7 +139,7 @@ class HeatMapGenerator:
             b = np.hstack((b, np.ones(1)))
 
             # Solve weights
-            w, res, rank, sing = np.linalg.lstsq(A, b)
+            w, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
 
             # Virtual vertex
             center = Vector(w @ X)
@@ -195,24 +187,39 @@ class HeatMapGenerator:
         # Combine into coarse mesh matrices
         M = np.transpose(P) @ (Mf @ P)
         S = np.transpose(P) @ (Sf @ P)
-        print("==== M ====")
-        print(np.array2string(M, max_line_width=500))
-        print("==== S ====")
-        print(np.array2string(S, max_line_width=500))
+        # print("==== M ====")
+        # print(np.array2string(M, max_line_width=500))
+        # print("==== S ====")
+        # print(np.array2string(S, max_line_width=500))
 
         # Diagonalize mass matrix by lumping rows together
         M = np.diag(np.sum(M, axis=1))
+
+        return M, S
+
+    def debug_build_virtual_verts(self, virtual_verts):
+        assert(len(virtual_verts) == len(self.bm.faces))
+        old_faces = list(self.bm.faces)
+        for oface, vv in zip(old_faces, virtual_verts):
+            nvert = self.bm.verts.new(vv)
+            for loop in oface.loops:
+                self.bm.faces.new((nvert, loop.vert, loop.link_loop_next.vert))
+            self.bm.faces.remove(oface)
+
+    def generate(self, boundary_vg, output_vg, time_scale=1.0):
+        # Build Laplacian
+        M, S = self.compute_laplacian()
 
         # Mean square edge length is used as a "time step" in heat flow solving.
         t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), start=0.0) / len(self.bm.edges) if self.bm.edges else 0.0
 
         # Solve the heat equation: (M - t*S) * u = b
         boundary = self.vgroup_to_array(boundary_vg, 0.0)
-        print("==== b ====")
-        print(np.array2string(boundary, max_line_width=500))
+        # print("==== b ====")
+        # print(np.array2string(boundary, max_line_width=500))
         u = np.linalg.solve(M - t*S, boundary)
-        print("==== u ====")
-        print(np.array2string(u, max_line_width=500))
+        # print("==== u ====")
+        # print(np.array2string(u, max_line_width=500))
 
         self.vgroup_from_array(output_vg, u)
 
