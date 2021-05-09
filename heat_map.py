@@ -232,7 +232,8 @@ class HeatMapGenerator:
         # Normalized gradient
         g = G @ u
         g = np.reshape(g, (-1, 3))
-        g = -g / np.expand_dims(np.sqrt(np.sum(np.square(g), axis=1)), axis=1)
+        gnorm = np.expand_dims(np.linalg.norm(g, axis=1), axis=1)
+        g = -np.divide(g, gnorm, out=np.zeros_like(g), where=gnorm!=0)
 
         d = np.linalg.solve(S, D @ g.flatten())
         d -= np.amin(d)
