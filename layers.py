@@ -70,8 +70,7 @@ class VertexColorWriter:
         self.vcol = vcol
 
     def __call__(self, bm, array):
-        print(array.shape, len(bm.verts), 3 * len(bm.verts))
-        assert(array.size == 3 * len(bm.verts))
+        assert(array.size == len(bm.verts))
         vcol_lay = bm.loops.layers.color.get(self.vcol.name)
         array_iter = np.nditer(array)
         for vert in bm.verts:

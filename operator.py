@@ -61,6 +61,12 @@ def _make_layer_settings(default_name, data_type):
             options={'ENUM_FLAG'},
         )
 
+        def draw(self, context, layout, text):
+            layout.label(text=text)
+            layout.prop(self, "layer_name")
+            row = layout.row(align=True)
+            row.prop(self, "layer_types", expand=True)
+
     return OutputLayerSettings
 
 
@@ -175,6 +181,23 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
 
         return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(self, "boundary_vgroup")
+
+        box = layout.box()
+        self.heat_output_layers.draw(context, box, text="Heat Output:")
+        box.prop(self, "heat_time_scale")
+
+        box = layout.box()
+        self.distance_output_layers.draw(context, box, text="Distance Output:")
+
 
 def menu_func(self, context):
     self.layout.separator()
