@@ -80,7 +80,7 @@ class HeatMapGenerator:
     #   Stiffness S
     #   Gradient G
     #   Divergence D
-    def compute_laplacian(self):
+    def compute_laplacian(self, vertex_stiffness):
         totverts = len(self.bm.verts)
         totfaces = len(self.bm.faces)
         # TODO any faster way to compute this? seems bm.loops has no len()
@@ -136,6 +136,7 @@ class HeatMapGenerator:
 
             # Virtual vertex
             center = Vector(w @ X)
+            stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), start=0.0)
 
             # TODO optimize me
             for k, loop in enumerate(face.loops):
@@ -167,9 +168,11 @@ class HeatMapGenerator:
                     Mf[idx_c, idx_c] += 2.0 * mass
 
                     # Cotan stiffness matrix for triangle mesh
-                    stiff_ab = 0.25 * abs(bc.dot(ca)) / area
-                    stiff_bc = 0.25 * abs(ca.dot(ab)) / area
-                    stiff_ca = 0.25 * abs(ab.dot(bc)) / area
+                    stiff_a = vertex_stiffness[idx_a]
+                    stiff_b = vertex_stiffness[idx_b]
+                    stiff_ab = 0.25 * abs(bc.dot(ca)) / area * stiff_a * stiff_b
+                    stiff_bc = 0.25 * abs(ca.dot(ab)) / area * stiff_b * stiff_c
+                    stiff_ca = 0.25 * abs(ab.dot(bc)) / area * stiff_c * stiff_a
                     Sf[idx_a, idx_b] += stiff_ab
                     Sf[idx_b, idx_a] += stiff_ab
                     Sf[idx_b, idx_c] += stiff_bc
@@ -212,12 +215,17 @@ class HeatMapGenerator:
                 self.bm.faces.new((nvert, loop.vert, loop.link_loop_next.vert))
             self.bm.faces.remove(oface)
 
-    def generate(self, boundary_reader, heat_writer, distance_writer, time_scale=1.0):
+    def generate(self, boundary_reader, obstacle_reader, heat_writer, distance_writer, time_scale=1.0):
         self.bm.verts.index_update()
         self.bm.faces.index_update()
 
         # Build Laplacian
-        M, S, G, D = self.compute_laplacian()
+        if obstacle_reader is None:
+            vertex_stiffness = np.ones(len(self.bm.verts))
+        else:
+            obstacle = obstacle_reader(self.bm)
+            vertex_stiffness = 1.0 - obstacle
+        M, S, G, D = self.compute_laplacian(vertex_stiffness)
 
         # Mean square edge length is used as a "time step" in heat flow solving.
         t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), start=0.0) / len(self.bm.edges) if self.bm.edges else 0.0

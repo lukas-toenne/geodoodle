@@ -28,7 +28,7 @@ from .heat_map import HeatMapGenerator
 
 
 # data_type in { 'SCALAR', 'VECTOR' }
-def _make_layer_settings(default_name, data_type):
+def _make_output_layer_settings(default_name, data_type):
     scalar_layer_types_items = [
         ('VERTEX_GROUP', "Vertex Group", "Vertex group"),
         ('VERTEX_COLOR', "Vertex Color", "Vertex color layer"),
@@ -106,8 +106,8 @@ def _get_layer_writer(settings, obj):
     return combined_writer
 
 
-HeatOutputLayerSettings = _make_layer_settings("Heat", 'SCALAR')
-DistanceOutputLayerSettings = _make_layer_settings("Distance", 'SCALAR')
+HeatOutputLayerSettings = _make_output_layer_settings("Heat", 'SCALAR')
+DistanceOutputLayerSettings = _make_output_layer_settings("Distance", 'SCALAR')
 
 
 class GeodesicDistanceOperator(bpy.types.Operator):
@@ -120,6 +120,12 @@ class GeodesicDistanceOperator(bpy.types.Operator):
         name="Boundary",
         description="Vertex group that defines the boundary where geodesic distance is zero",
         default="Boundary",
+    )
+
+    obstacle_vgroup : StringProperty(
+        name="Obstacle",
+        description="Vertex group that artificially locally decreases geodesic distance",
+        default="Obstacle",
     )
 
     heat_output_layers : PointerProperty(type=HeatOutputLayerSettings)
@@ -155,10 +161,14 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing boundary vertex group " + self.boundary_vgroup)
             return {'CANCELLED'}
 
+        obstacle_vg = obj.vertex_groups.get(self.obstacle_vgroup, None)
+
         orig_mode = obj.mode
         bpy.ops.object.mode_set(mode='OBJECT')
         try:
             # Note: Create writers before bm.from_mesh, so data layers are fully initialized
+            boundary_reader = VertexGroupReader(boundary_vg, 0.0)
+            obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
             heat_writer = _get_layer_writer(self.heat_output_layers, obj)
             distance_writer = _get_layer_writer(self.distance_output_layers, obj)
 
@@ -166,12 +176,7 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             bm.from_mesh(obj.data)
 
             heat_map_gen = HeatMapGenerator(bm)
-            heat_map_gen.generate(
-                VertexGroupReader(boundary_vg, 0.0),
-                heat_writer,
-                distance_writer,
-                self.heat_time_scale
-            )
+            heat_map_gen.generate(boundary_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
 
             bm.to_mesh(obj.data)
             bm.free()
