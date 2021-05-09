@@ -23,7 +23,7 @@ Geodesic distance describes a shortest path from any point on the surface to som
 1. Create a mesh object.
 2. Add a boundary vertex group. The default name should be "Boundary", although the operator can work with arbitrary vertex groups.
 
-   If the vertex group is generated procedurally with a modifier, make sure to apply the modifier so the vertex group becomes part of the mesh data.
+   Procedurally generated vertex groups are also supported (e.g. with a proximity modifier). However, topology modifiers such as subdivision are not recommended because the operator will copy the modifier result to the base mesh.
 
 3. Select the mesh object.
 4. Invoke the _Geodesic Distance_ operator from the dropdown next to the vertex group list.
