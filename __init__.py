@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 bl_info = {
-    "name": "GeoDoozy",
+    "name": "GeoDoodle",
     "author": "Lukas Toenne",
     "version": (0, 1),
     "blender": (2, 92, 0),
