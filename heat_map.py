@@ -149,10 +149,11 @@ class HeatMapGenerator:
                 ca = loop.vert.co - center
 
                 normal = ca.cross(bc)
-                # TODO minor optimize: re-use length
-                area = normal.length / 2
-                normal.normalize()
-                if area > 0:
+                norlen = normal.length
+                if norlen > 0:
+                    normal /= norlen
+                    area = norlen / 2
+
                     # Area of the fan triangles contributes to face verts and the virtual center vert
                     mass = area / 12 # 1/12 contribution to each corner
                     Mf[idx_a, idx_b] += mass
