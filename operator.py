@@ -195,6 +195,7 @@ class GeodesicDistanceOperator(bpy.types.Operator):
         layout = self.layout
 
         layout.prop(self, "boundary_vgroup")
+        layout.prop(self, "obstacle_vgroup")
 
         box = layout.box()
         self.heat_output_layers.draw(context, box, text="Heat Output:")
