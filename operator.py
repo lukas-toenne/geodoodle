@@ -172,8 +172,9 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             heat_writer = _get_layer_writer(self.heat_output_layers, obj)
             distance_writer = _get_layer_writer(self.distance_output_layers, obj)
 
+            depsgraph = context.evaluated_depsgraph_get()
             bm = bmesh.new()
-            bm.from_mesh(obj.data)
+            bm.from_object(obj, depsgraph)
 
             heat_map_gen = HeatMapGenerator(bm)
             heat_map_gen.generate(boundary_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
