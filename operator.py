@@ -23,7 +23,85 @@
 import bpy
 import bmesh
 from bpy.props import *
+from .layers import *
 from .heat_map import HeatMapGenerator
+
+
+# data_type in { 'SCALAR', 'VECTOR' }
+def _make_layer_settings(default_name, data_type):
+    scalar_layer_types_items = [
+        ('VERTEX_GROUP', "Vertex Group", "Vertex group"),
+        ('VERTEX_COLOR', "Vertex Color", "Vertex color layer"),
+        ('UV_LAYER', "UV Layer", "UV Layer"),
+    ]
+    scalar_layer_types_default = {'VERTEX_GROUP', 'UV_LAYER'}
+    vector_layer_types_items = [
+        ('VERTEX_COLOR', "Vertex Color", "Vertex color layer"),
+    ]
+    vector_layer_types_default = {'VERTEX_COLOR'}
+
+    layer_types_map = {
+        'SCALAR' : (scalar_layer_types_items, scalar_layer_types_default),
+        'VECTOR' : (vector_layer_types_items, vector_layer_types_default),
+    }
+    layer_types_items, layer_types_default = layer_types_map[data_type]
+
+    class OutputLayerSettings(bpy.types.PropertyGroup):
+        layer_name : StringProperty(
+            name="Layer Name",
+            description="Name of the vertex data layer",
+            default=default_name,
+        )
+
+        layer_types : EnumProperty(
+            items=layer_types_items,
+            name="Layer Types",
+            description="Types of vertex data layers to use for storing values",
+            default=layer_types_default,
+            options={'ENUM_FLAG'},
+        )
+
+    return OutputLayerSettings
+
+
+def _get_layer_writer(settings, obj):
+    if 'VERTEX_GROUP' in settings.layer_types:
+        vgroup = obj.vertex_groups.get(settings.layer_name, None)
+        if vgroup is None:
+            vgroup = obj.vertex_groups.new(name=settings.layer_name)
+        vgroup_writer = VertexGroupWriter(vgroup)
+    else:
+        vgroup_writer = None
+
+    if 'UV_LAYER' in settings.layer_types:
+        uvlayer = obj.data.uv_layers.get(settings.layer_name, None)
+        if uvlayer is None:
+            uvlayer = obj.data.uv_layers.new(name=settings.layer_name, do_init=False)
+        uvlayer_writer = UVLayerWriter(uvlayer)
+    else:
+        uvlayer_writer = None
+
+    if 'VERTEX_COLOR' in settings.layer_types:
+        vcol = obj.data.vertex_colors.get(settings.layer_name, None)
+        if vcol is None:
+            vcol = obj.data.vertex_colors.new(name=settings.layer_name, do_init=False)
+        vcol_writer = VertexColorWriter(vcol)
+    else:
+        vcol_writer = None
+
+    def combined_writer(bm, array):
+        if vgroup_writer:
+            vgroup_writer(bm, array)
+        if uvlayer_writer:
+            uvlayer_writer(bm, array)
+        if vcol_writer:
+            vcol_writer(bm, array)
+
+    return combined_writer
+
+
+HeatOutputLayerSettings = _make_layer_settings("Heat", 'SCALAR')
+DistanceOutputLayerSettings = _make_layer_settings("Distance", 'SCALAR')
 
 
 class GeodesicDistanceOperator(bpy.types.Operator):
@@ -32,25 +110,16 @@ class GeodesicDistanceOperator(bpy.types.Operator):
     bl_label = 'Geodesic Distance'
     bl_options = {'UNDO', 'REGISTER'}
 
-    heat_vgroup : StringProperty(
-        name="Heat",
-        description="Output vertex group to write heat values into",
-        default="Heat",
-    )
-
-    distance_vgroup : StringProperty(
-        name="Distance",
-        description="Output vertex group to write distance values into",
-        default="Distance",
-    )
-
     boundary_vgroup : StringProperty(
         name="Boundary",
         description="Vertex group that defines the boundary where geodesic distance is zero",
         default="Boundary",
     )
 
-    time_scale : FloatProperty(
+    heat_output_layers : PointerProperty(type=HeatOutputLayerSettings)
+    distance_output_layers : PointerProperty(type=DistanceOutputLayerSettings)
+
+    heat_time_scale : FloatProperty(
         name="Time Scale",
         description="Scaling of the time step for heat map calculation",
         default=1.0,
@@ -80,24 +149,23 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing boundary vertex group " + self.boundary_vgroup)
             return {'CANCELLED'}
 
-        heat_vg = ensure_vgroup(self.heat_vgroup)
-        if heat_vg is None:
-            self.report({'ERROR'}, "Could not create heat vertex group " + self.heat_vgroup)
-            return {'CANCELLED'}
-
-        distance_vg = ensure_vgroup(self.distance_vgroup)
-        if distance_vg is None:
-            self.report({'ERROR'}, "Could not create distance vertex group " + self.distance_vgroup)
-            return {'CANCELLED'}
-
         orig_mode = obj.mode
         bpy.ops.object.mode_set(mode='OBJECT')
         try:
+            # Note: Create writers before bm.from_mesh, so data layers are fully initialized
+            heat_writer = _get_layer_writer(self.heat_output_layers, obj)
+            distance_writer = _get_layer_writer(self.distance_output_layers, obj)
+
             bm = bmesh.new()
             bm.from_mesh(obj.data)
 
             heat_map_gen = HeatMapGenerator(bm)
-            heat_map_gen.generate(boundary_vg, heat_vg, self.time_scale)
+            heat_map_gen.generate(
+                VertexGroupReader(boundary_vg, 0.0),
+                heat_writer,
+                distance_writer,
+                self.heat_time_scale
+            )
 
             bm.to_mesh(obj.data)
             bm.free()
@@ -110,15 +178,21 @@ class GeodesicDistanceOperator(bpy.types.Operator):
 
 def menu_func(self, context):
     self.layout.separator()
-    self.layout.operator(GeodesicDistanceOperator.bl_idname)
+    props = self.layout.operator(GeodesicDistanceOperator.bl_idname)
 
 
 def register():
+    bpy.utils.register_class(HeatOutputLayerSettings)
+    bpy.utils.register_class(DistanceOutputLayerSettings)
     bpy.utils.register_class(GeodesicDistanceOperator)
     bpy.types.MESH_MT_vertex_group_context_menu.append(menu_func)
     bpy.types.VIEW3D_MT_paint_weight.append(menu_func)
+    bpy.types.VIEW3D_MT_object.append(menu_func)
 
 def unregister():
+    bpy.utils.unregister_class(HeatOutputLayerSettings)
+    bpy.utils.unregister_class(DistanceOutputLayerSettings)
     bpy.utils.unregister_class(GeodesicDistanceOperator)
     bpy.types.MESH_MT_vertex_group_context_menu.remove(menu_func)
     bpy.types.VIEW3D_MT_paint_weight.remove(menu_func)
+    bpy.types.VIEW3D_MT_object.remove(menu_func)

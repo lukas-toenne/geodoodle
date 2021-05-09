@@ -33,11 +33,12 @@ bl_info = {
 }
 
 import bpy
-from . import heat_map, operator
+from . import heat_map, layers, operator
 
 if "bpy" in locals():
     import importlib
     importlib.reload(heat_map)
+    importlib.reload(layers)
     importlib.reload(operator)
 
 
