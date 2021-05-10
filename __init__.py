@@ -42,28 +42,62 @@ if "bpy" in locals():
     importlib.reload(operator)
 
 
-# XXX run this to install scipy!
-# https://blender.stackexchange.com/a/153520
-def install_scipy():
-    import sys
-    import subprocess
-    import bpy
+scipy_found = False
+def check_scipy():
+    global scipy_found
+    import importlib
+    scipy_spec = importlib.util.find_spec("scipy")
+    scipy_found = scipy_spec is not None
 
-    py_exec = sys.executable
-    py_prefix = sys.exec_prefix
-    # ensure pip is installed & update
-    subprocess.call([str(py_exec), "-m", "ensurepip", "--user"])
-    subprocess.call([str(py_exec), "-m", "pip", "install", "--target={}".format(py_prefix), "--upgrade", "pip"])
-    # install dependencies using pip
-    # dependencies such as 'numpy' could be added to the end of this command's list
-    subprocess.call([str(py_exec),"-m", "pip", "install", "--target={}".format(py_prefix), "scipy"])
+check_scipy()
+
+class SciPyInstallOperator(bpy.types.Operator):
+    """Install SciPy into local Blender python packages"""
+    bl_idname = "geodoodle.scipy_install"
+    bl_label = "Install SciPy"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        import sys
+        import subprocess
+        import bpy
+
+        # https://blender.stackexchange.com/a/153520
+        py_exec = sys.executable
+        py_prefix = sys.exec_prefix
+        # ensure pip is installed & update
+        subprocess.call([str(py_exec), "-m", "ensurepip", "--user"])
+        subprocess.call([str(py_exec), "-m", "pip", "install", "--target={}".format(py_prefix), "--upgrade", "pip"])
+        # install dependencies using pip
+        # dependencies such as 'numpy' could be added to the end of this command's list
+        subprocess.call([str(py_exec),"-m", "pip", "install", "--target={}".format(py_prefix), "scipy"])
+
+        check_scipy()
+
+        return {'FINISHED'}
+
+
+class GeoDoodleAddonPreferences(bpy.types.AddonPreferences):
+    # this must match the add-on name, use '__package__'
+    # when defining this in a submodule of a python package.
+    bl_idname = __name__
+
+    def draw(self, context):
+        layout = self.layout
+        if not scipy_found:
+            layout.label(text="SciPy not installed in local Blender packages", icon='ERROR')
+        layout.operator(SciPyInstallOperator.bl_idname)
+
 
 def register():
-    # install_scipy()
     operator.register()
+    bpy.utils.register_class(SciPyInstallOperator)
+    bpy.utils.register_class(GeoDoodleAddonPreferences)
 
 def unregister():
     operator.unregister()
+    bpy.utils.unregister_class(SciPyInstallOperator)
+    bpy.utils.unregister_class(GeoDoodleAddonPreferences)
 
 if __name__ == "__main__":
     register()
