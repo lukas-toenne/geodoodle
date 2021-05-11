@@ -22,6 +22,7 @@
 
 import bpy
 import bmesh
+import time
 from bpy.props import *
 from .layers import *
 from .heat_map import HeatMapGenerator
@@ -179,7 +180,10 @@ class GeodesicDistanceOperator(bpy.types.Operator):
 
             heat_map_gen = HeatMapGenerator(bm)
             # heat_map_gen = HeatMapGeneratorOld(bm)
+            perf_start = time.perf_counter()
             heat_map_gen.generate(boundary_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
+            perf_end = time.perf_counter()
+            print("Geodesic Distance computation time: {:0.4f}".format(perf_end - perf_start))
 
             bm.to_mesh(obj.data)
             bm.free()
