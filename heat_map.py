@@ -28,6 +28,37 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
 
+# Utility class for building a sparse coordinate matrix.
+class CooBuilder:
+    def __init__(self, shape, entries, dtype=float):
+        self.shape = shape
+        self.entries = entries
+        self.rows = np.empty(entries, dtype=int)
+        self.cols = np.empty(entries, dtype=int)
+        self.data = np.empty(entries, dtype=dtype)
+        self.index = 0
+
+    def construct(self):
+        assert(self.index == self.entries)
+        return sparse.coo_matrix((self.data, (self.rows, self.cols)), shape=self.shape)
+
+    def append(self, row, col, data):
+        assert(self.index < self.entries)
+        self.rows[self.index] = row
+        self.cols[self.index] = col
+        self.data[self.index] = data
+        self.index += 1
+
+    def extend(self, rows, cols, data):
+        count = len(data)
+        assert(len(rows) == count)
+        assert(len(cols) == count)
+        assert(self.index < self.entries)
+        self.rows[self.index:self.index+count] = rows[:]
+        self.cols[self.index:self.index+count] = cols[:]
+        self.data[self.index:self.index+count] = data[:]
+        self.index += count
+
 class HeatMapGenerator:
     def __init__(self, bm):
         self.bm = bm
@@ -90,16 +121,20 @@ class HeatMapGenerator:
 
         refinedverts = totverts + totfaces # One virtual vertex added per face
         refinedfaces = totloops # Each face replaced by a triangle fan
+
         # Elongation matrix P: Maps vertices of the original mesh to vertices of the refined (subdivided) mesh.
         #   First totverts rows are identity matrix (old verts are part of the refined mesh).
         #   Lower totfaces rows are weights for constructing a virtual vertex for each face
-        #   entries=totloops, shape=(totverts + totfaces, totverts)
-        # P = np.vstack((np.identity(totverts), np.zeros((totfaces, totverts))))
-        P_rows = np.hstack((np.arange(totverts, dtype=int), np.zeros(totloops, dtype=int)))
-        P_cols = np.hstack((np.arange(totverts, dtype=int), np.zeros(totloops, dtype=int)))
-        P_data = np.hstack((np.ones(totverts, dtype=float), np.zeros(totloops, dtype=float)))
+        P_builder = CooBuilder((refinedverts, totverts), totverts + totloops, dtype=float)
+        P_builder.extend(np.arange(totverts, dtype=int), np.arange(totverts, dtype=int), np.ones(totverts, dtype=float))
+
+        # Face areas for computing divergence from gradient operator
         Af = np.zeros((refinedfaces))
-        Mf = np.zeros((refinedverts, refinedverts))
+
+        # Mass matrix Mf (for the refined mesh): Triangle areas determine inertia in heat propagation.
+        # Multiple entries for vertices are expected, these get summed up by the coo_matrix constructor.
+        Mf_builder = CooBuilder((refinedverts, refinedverts), 9 * totloops, dtype=float)
+
         Sf = np.zeros((refinedverts, refinedverts))
         Gf = np.zeros((refinedfaces * 3, refinedverts))
 
@@ -150,10 +185,7 @@ class HeatMapGenerator:
             # TODO optimize me
             for k, loop in enumerate(face.loops):
                 loop_idx = loop_count + k
-                # P[totverts + face.index, loop.vert.index] = w[k]
-                P_rows[totverts + loop_idx] = totverts + face.index
-                P_cols[totverts + loop_idx] = loop.vert.index
-                P_data[totverts + loop_idx] = w[k]
+                P_builder.append(totverts + face.index, loop.vert.index, w[k])
 
                 idx_a = loop.vert.index
                 idx_b = loop.link_loop_next.vert.index
@@ -170,15 +202,15 @@ class HeatMapGenerator:
 
                     # Area of the fan triangles contributes to face verts and the virtual center vert
                     mass = area / 12 # 1/12 contribution to each corner
-                    Mf[idx_a, idx_b] += mass
-                    Mf[idx_b, idx_a] += mass
-                    Mf[idx_b, idx_c] += mass
-                    Mf[idx_c, idx_b] += mass
-                    Mf[idx_c, idx_a] += mass
-                    Mf[idx_a, idx_c] += mass
-                    Mf[idx_a, idx_a] += 2.0 * mass
-                    Mf[idx_b, idx_b] += 2.0 * mass
-                    Mf[idx_c, idx_c] += 2.0 * mass
+                    Mf_builder.append(idx_a, idx_a, 2.0 * mass)
+                    Mf_builder.append(idx_a, idx_b, mass)
+                    Mf_builder.append(idx_a, idx_c, mass)
+                    Mf_builder.append(idx_b, idx_a, mass)
+                    Mf_builder.append(idx_b, idx_b, 2.0 * mass)
+                    Mf_builder.append(idx_b, idx_c, mass)
+                    Mf_builder.append(idx_c, idx_a, mass)
+                    Mf_builder.append(idx_c, idx_b, mass)
+                    Mf_builder.append(idx_c, idx_c, 2.0 * mass)
 
                     # Cotan stiffness matrix for triangle mesh
                     stiff_a = vertex_stiffness[idx_a]
@@ -201,14 +233,25 @@ class HeatMapGenerator:
                     Gf[idx_g:idx_g+3, idx_a] = (0.5 * normal.cross(bc) / area)[:]
                     Gf[idx_g:idx_g+3, idx_b] = (0.5 * normal.cross(ca) / area)[:]
                     Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
+                else:
+                    # Zero entries to fill up coo_matrix construction arrays
+                    Mf_builder.append(idx_a, idx_a, 0.0)
+                    Mf_builder.append(idx_a, idx_b, 0.0)
+                    Mf_builder.append(idx_a, idx_c, 0.0)
+                    Mf_builder.append(idx_b, idx_a, 0.0)
+                    Mf_builder.append(idx_b, idx_b, 0.0)
+                    Mf_builder.append(idx_b, idx_c, 0.0)
+                    Mf_builder.append(idx_c, idx_a, 0.0)
+                    Mf_builder.append(idx_c, idx_b, 0.0)
+                    Mf_builder.append(idx_c, idx_c, 0.0)
 
             loop_count += len(face.verts)
-        P = sparse.coo_matrix((P_data, (P_rows, P_cols)), shape=(totverts + totfaces, totverts))
+        Mf = Mf_builder.construct()
+        P = P_builder.construct()
         log_matrix(P, "P")
         log_matrix(Mf, "Mf")
         log_matrix(Sf, "Sf")
         log_matrix(Gf, "Gf")
-        Mf = sparse.csr_matrix(Mf)
         Sf = sparse.csr_matrix(Sf)
         Gf = sparse.csr_matrix(Gf)
 
