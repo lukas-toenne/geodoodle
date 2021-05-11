@@ -219,16 +219,17 @@ class HeatMapGenerator:
             loop_count += len(face.verts)
 
         # Combine into coarse mesh matrices
-        M = sparse.csr_matrix(np.transpose(P) @ (Mf @ P))
-        S = sparse.csr_matrix(np.transpose(P) @ (Sf @ P))
+        M = np.transpose(P) @ (Mf @ P)
+        S = np.transpose(P) @ (Sf @ P)
 
         # Diagonalize mass matrix by lumping rows together
-        M = sparse.dia_matrix(M.sum(axis=1))
+        # TODO return just the 1-dim diagonal vector and multiply component-wise
+        M = np.diag(np.sum(M, axis=1))
 
         Af = np.repeat(Af, 3, axis=0)
         Df = -np.transpose(Gf) * Af
-        G = sparse.csr_matrix(Gf @ P)
-        D = sparse.csr_matrix(np.transpose(P) @ Df)
+        G = Gf @ P
+        D = np.transpose(P) @ Df
 
         return M, S, G, D
 
@@ -253,9 +254,8 @@ class HeatMapGenerator:
 
         # Solve the heat equation: (M - t*S) * u = b
         boundary = boundary_reader(self.bm)
-        u = sparse.linalg.spsolve(M - t*S, boundary)
+        u = np.linalg.solve(M - t*S, boundary)
         log_matrix(u, "u")
-        # print(np.array2string(u, max_line_width=500))
 
         heat_writer(self.bm, u)
 
@@ -266,7 +266,7 @@ class HeatMapGenerator:
         g = -np.divide(g, gnorm, out=np.zeros_like(g), where=gnorm!=0)
         log_matrix(g, "g")
 
-        d = sparse.linalg.spsolve(S, D @ g.flatten())
+        d = np.linalg.solve(S, D @ g.flatten())
         d -= np.amin(d)
         log_matrix(d, "d")
         distance_writer(self.bm, d)

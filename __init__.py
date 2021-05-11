@@ -33,11 +33,12 @@ bl_info = {
 }
 
 import bpy
-from . import heat_map, layers, operator
+from . import heat_map, heat_map_old, layers, operator
 
 if "bpy" in locals():
     import importlib
     importlib.reload(heat_map)
+    importlib.reload(heat_map_old)
     importlib.reload(layers)
     importlib.reload(operator)
 
@@ -47,6 +48,7 @@ def check_scipy():
     global scipy_found
     import importlib
     scipy_spec = importlib.util.find_spec("scipy")
+    print(scipy_spec)
     scipy_found = scipy_spec is not None
 
 check_scipy()
