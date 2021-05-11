@@ -24,11 +24,12 @@ bl_info = {
     "name": "GeoDoodle",
     "author": "Lukas Toenne",
     "version": (0, 1),
-    "blender": (2, 92, 0),
-    "location": "",
+    "blender": (2, 93, 0),
+    "location": "View3D > Object > Geodesic Distance",
     "description": "Compute geodesic distance using a heat method",
     "warning": "",
-    "doc_url": "",
+    "doc_url": "https://github.com/lukas-toenne/geodoodle",
+    "tracker_url": "https://github.com/lukas-toenne/geodoodle/issues",
     "category": "Mesh",
 }
 
@@ -47,6 +48,7 @@ scipy_found = False
 def check_scipy():
     global scipy_found
     import importlib
+    from importlib import util
     scipy_spec = importlib.util.find_spec("scipy")
     print(scipy_spec)
     scipy_found = scipy_spec is not None
