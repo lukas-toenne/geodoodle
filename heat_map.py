@@ -90,7 +90,14 @@ class HeatMapGenerator:
 
         refinedverts = totverts + totfaces # One virtual vertex added per face
         refinedfaces = totloops # Each face replaced by a triangle fan
-        P = np.vstack((np.identity(totverts), np.zeros((totfaces, totverts))))
+        # Elongation matrix P: Maps vertices of the original mesh to vertices of the refined (subdivided) mesh.
+        #   First totverts rows are identity matrix (old verts are part of the refined mesh).
+        #   Lower totfaces rows are weights for constructing a virtual vertex for each face
+        #   entries=totloops, shape=(totverts + totfaces, totverts)
+        # P = np.vstack((np.identity(totverts), np.zeros((totfaces, totverts))))
+        P_rows = np.hstack((np.arange(totverts, dtype=int), np.zeros(totloops, dtype=int)))
+        P_cols = np.hstack((np.arange(totverts, dtype=int), np.zeros(totloops, dtype=int)))
+        P_data = np.hstack((np.ones(totverts, dtype=float), np.zeros(totloops, dtype=float)))
         Af = np.zeros((refinedfaces))
         Mf = np.zeros((refinedverts, refinedverts))
         Sf = np.zeros((refinedverts, refinedverts))
@@ -142,7 +149,11 @@ class HeatMapGenerator:
 
             # TODO optimize me
             for k, loop in enumerate(face.loops):
-                P[totverts + face.index, loop.vert.index] = w[k]
+                loop_idx = loop_count + k
+                # P[totverts + face.index, loop.vert.index] = w[k]
+                P_rows[totverts + loop_idx] = totverts + face.index
+                P_cols[totverts + loop_idx] = loop.vert.index
+                P_data[totverts + loop_idx] = w[k]
 
                 idx_a = loop.vert.index
                 idx_b = loop.link_loop_next.vert.index
@@ -192,14 +203,14 @@ class HeatMapGenerator:
                     Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
 
             loop_count += len(face.verts)
-        P = sparse.csr_matrix(P)
+        P = sparse.coo_matrix((P_data, (P_rows, P_cols)), shape=(totverts + totfaces, totverts))
         log_matrix(P, "P")
-        Mf = sparse.csr_matrix(Mf)
         log_matrix(Mf, "Mf")
-        Sf = sparse.csr_matrix(Sf)
         log_matrix(Sf, "Sf")
-        Gf = sparse.csr_matrix(Gf)
         log_matrix(Gf, "Gf")
+        Mf = sparse.csr_matrix(Mf)
+        Sf = sparse.csr_matrix(Sf)
+        Gf = sparse.csr_matrix(Gf)
 
         # Combine into coarse mesh matrices
         M = P.transpose() @ Mf @ P

@@ -192,6 +192,9 @@ class HeatMapGenerator:
                     Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
 
             loop_count += len(face.verts)
+        log_matrix(P, "P")
+        log_matrix(Mf, "Mf")
+        log_matrix(Sf, "Sf")
         log_matrix(Gf, "Gf")
 
         # Combine into coarse mesh matrices
