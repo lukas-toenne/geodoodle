@@ -64,7 +64,6 @@ class SciPyInstallOperator(bpy.types.Operator):
     def execute(self, context):
         import sys
         import subprocess
-        import bpy
 
         # https://blender.stackexchange.com/a/153520
         py_exec = sys.executable

@@ -18,6 +18,35 @@ Geodesic distance describes a shortest path from any point on the surface to som
 | ![](images/Plane.png) | ![](images/Torus.png) |
 | ![](images/Monkey.png) | ![](images/Island.png) |
 
+## Prerequisites
+
+The addon uses the [SciPy](https://scipy.org/) math library for efficient sparse matrix computations.
+
+SciPy is not shipped with the Python installation in Blender, so you may need to install the package once.
+A convenient method is to use the text editor.
+
+**Note: You may need to run Blender in administrator mode for permissions to install into the packages folder!**
+
+1. Open Blender.
+1. Open a text editor window and create a new text.
+1. Paste in the following code and execute the script:
+
+   ```
+   import sys
+   import subprocess
+   
+   py_exec = sys.executable
+   py_prefix = sys.exec_prefix
+   # ensure pip is installed & update
+   subprocess.call([str(py_exec), "-m", "ensurepip", "--user"])
+   subprocess.call([str(py_exec), "-m", "pip", "install", "--target={}".format(py_prefix), "--upgrade", "pip"])
+   # install dependencies using pip
+   # dependencies such as 'numpy' could be added to the end of this command's list
+   subprocess.call([str(py_exec),"-m", "pip", "install", "--target={}".format(py_prefix), "scipy"])
+   ```
+
+   Source: https://blender.stackexchange.com/a/153520
+
 ## Usage
 
 1. Create a mesh object.
