@@ -46,6 +46,7 @@ scipy_found = False
 def check_scipy():
     global scipy_found
     import importlib
+    from importlib import util
     scipy_spec = importlib.util.find_spec("scipy")
     scipy_found = scipy_spec is not None
 
