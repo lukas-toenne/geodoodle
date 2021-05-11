@@ -38,7 +38,7 @@ def log_matrix(m, name):
             unit = "KB"
     else:
         unit = "Bytes"
-    print("{name: <4} {mtype: <8} {shape: <12} {size:.2f} {unit}".format(name=name+":", shape=str(m.shape)+",", mtype="["+mtype+"]", size=size, unit=unit))
+    print("{name: <4} {mtype: <8} {shape: <20} {size:.2f} {unit}".format(name=name+":", shape=str(m.shape)+",", mtype="["+mtype+"]", size=size, unit=unit))
     pass
 
 

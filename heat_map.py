@@ -125,7 +125,7 @@ class HeatMapGenerator:
         # Elongation matrix P: Maps vertices of the original mesh to vertices of the refined (subdivided) mesh.
         #   First totverts rows are identity matrix (old verts are part of the refined mesh).
         #   Lower totfaces rows are weights for constructing a virtual vertex for each face
-        P_builder = CooBuilder((refinedverts, totverts), totverts + totloops, dtype=float)
+        P_builder = CooBuilder(shape=(refinedverts, totverts), entries=totverts+totloops, dtype=float)
         P_builder.extend(np.arange(totverts, dtype=int), np.arange(totverts, dtype=int), np.ones(totverts, dtype=float))
 
         # Face areas for computing divergence from gradient operator
@@ -133,10 +133,14 @@ class HeatMapGenerator:
 
         # Mass matrix Mf (for the refined mesh): Triangle areas determine inertia in heat propagation.
         # Multiple entries for vertices are expected, these get summed up by the coo_matrix constructor.
-        Mf_builder = CooBuilder((refinedverts, refinedverts), 9 * totloops, dtype=float)
+        Mf_builder = CooBuilder(shape=(refinedverts, refinedverts), entries=9*totloops, dtype=float)
 
-        Sf = np.zeros((refinedverts, refinedverts))
-        Gf = np.zeros((refinedfaces * 3, refinedverts))
+        # Stiffness matrix Sf: Cotan of adjacent angles defines heat propagation speed along edges.
+        # Multiple entries for vertices are expected, these get summed up by the coo_matrix constructor.
+        Sf_builder = CooBuilder(shape=(refinedverts, refinedverts), entries=9*totloops, dtype=float)
+
+        # Gradient operator Gf: computes per-loop gradient vector from a scalar field.
+        Gf_builder = CooBuilder(shape=(refinedfaces * 3, refinedverts), entries=9*totloops, dtype=float)
 
         loop_count = 0
         for face in self.bm.faces:
@@ -218,21 +222,21 @@ class HeatMapGenerator:
                     stiff_ab = 0.25 * abs(bc.dot(ca)) / area * stiff_a * stiff_b
                     stiff_bc = 0.25 * abs(ca.dot(ab)) / area * stiff_b * stiff_c
                     stiff_ca = 0.25 * abs(ab.dot(bc)) / area * stiff_c * stiff_a
-                    Sf[idx_a, idx_b] += stiff_ab
-                    Sf[idx_b, idx_a] += stiff_ab
-                    Sf[idx_b, idx_c] += stiff_bc
-                    Sf[idx_c, idx_b] += stiff_bc
-                    Sf[idx_c, idx_a] += stiff_ca
-                    Sf[idx_a, idx_c] += stiff_ca
-                    Sf[idx_a, idx_a] -= stiff_ab + stiff_ca
-                    Sf[idx_b, idx_b] -= stiff_bc + stiff_ab
-                    Sf[idx_c, idx_c] -= stiff_ca + stiff_bc
+                    Sf_builder.append(idx_a, idx_a, -stiff_ab - stiff_ca)
+                    Sf_builder.append(idx_a, idx_b, stiff_ab)
+                    Sf_builder.append(idx_a, idx_c, stiff_ca)
+                    Sf_builder.append(idx_b, idx_a, stiff_ab)
+                    Sf_builder.append(idx_b, idx_b, -stiff_bc - stiff_ab)
+                    Sf_builder.append(idx_b, idx_c, stiff_bc)
+                    Sf_builder.append(idx_c, idx_a, stiff_ca)
+                    Sf_builder.append(idx_c, idx_b, stiff_bc)
+                    Sf_builder.append(idx_c, idx_c, -stiff_ca - stiff_bc)
 
                     Af[loop_count + k] = area
                     idx_g = (loop_count + k) * 3
-                    Gf[idx_g:idx_g+3, idx_a] = (0.5 * normal.cross(bc) / area)[:]
-                    Gf[idx_g:idx_g+3, idx_b] = (0.5 * normal.cross(ca) / area)[:]
-                    Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_a, idx_a, idx_a], (0.5 * normal.cross(bc) / area)[:])
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_b, idx_b, idx_b], (0.5 * normal.cross(ca) / area)[:])
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_c, idx_c, idx_c], (0.5 * normal.cross(ab) / area)[:])
                 else:
                     # Zero entries to fill up coo_matrix construction arrays
                     Mf_builder.append(idx_a, idx_a, 0.0)
@@ -245,15 +249,25 @@ class HeatMapGenerator:
                     Mf_builder.append(idx_c, idx_b, 0.0)
                     Mf_builder.append(idx_c, idx_c, 0.0)
 
+                    Sf_builder.append(idx_a, idx_a, 0.0)
+                    Sf_builder.append(idx_a, idx_b, 0.0)
+                    Sf_builder.append(idx_a, idx_c, 0.0)
+                    Sf_builder.append(idx_b, idx_a, 0.0)
+                    Sf_builder.append(idx_b, idx_b, 0.0)
+                    Sf_builder.append(idx_b, idx_c, 0.0)
+                    Sf_builder.append(idx_c, idx_a, 0.0)
+                    Sf_builder.append(idx_c, idx_b, 0.0)
+                    Sf_builder.append(idx_c, idx_c, 0.0)
+
             loop_count += len(face.verts)
-        Mf = Mf_builder.construct()
         P = P_builder.construct()
+        Mf = Mf_builder.construct()
+        Sf = Sf_builder.construct()
+        Gf = Gf_builder.construct()
         log_matrix(P, "P")
         log_matrix(Mf, "Mf")
         log_matrix(Sf, "Sf")
         log_matrix(Gf, "Gf")
-        Sf = sparse.csr_matrix(Sf)
-        Gf = sparse.csr_matrix(Gf)
 
         # Combine into coarse mesh matrices
         M = P.transpose() @ Mf @ P
