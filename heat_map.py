@@ -23,39 +23,14 @@
 import bpy
 from math import sqrt
 from mathutils import Vector
+from .util import *
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
 
-def log_matrix(m, name):
-    if isinstance(m, np.ndarray):
-        size = m.nbytes
-    else:
-        size = m.data.size
-    if size > 1024.0:
-        size /= 1024.0
-        if size > 1024.0:
-            size /= 1024.0
-            unit = "MB"
-        else:
-            unit = "KB"
-    else:
-        unit = "Bytes"
-    print("{name}: {shape}, {size:.3f} {unit}".format(name=name, shape=m.shape, size=size, unit=unit))
-    pass
-
 class HeatMapGenerator:
     def __init__(self, bm):
         self.bm = bm
-
-    def debug_build_virtual_verts(self, virtual_verts):
-        assert(len(virtual_verts) == len(self.bm.faces))
-        old_faces = list(self.bm.faces)
-        for oface, vv in zip(old_faces, virtual_verts):
-            nvert = self.bm.verts.new(vv)
-            for loop in oface.loops:
-                self.bm.faces.new((nvert, loop.vert, loop.link_loop_next.vert))
-            self.bm.faces.remove(oface)
 
     def get_face_edge_matrix(self, face):
         numedges = len(face.loops)
@@ -217,22 +192,32 @@ class HeatMapGenerator:
                     Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
 
             loop_count += len(face.verts)
+        Gf = sparse.csr_matrix(Gf)
+        log_matrix(Gf, "Gf")
 
         # Combine into coarse mesh matrices
         M = sparse.csr_matrix(np.transpose(P) @ (Mf @ P))
         S = sparse.csr_matrix(np.transpose(P) @ (Sf @ P))
+        log_matrix(S, "S")
 
         # Diagonalize mass matrix by lumping rows together
-        M = sparse.dia_matrix(M.sum(axis=1))
+        M = sparse.dia_matrix((M.sum(axis=1).transpose(), 0), M.shape)
+        log_matrix(M, "M")
 
-        Af = np.repeat(Af, 3, axis=0)
-        Df = -np.transpose(Gf) * Af
+        Af = sparse.diags(np.repeat(Af, 3, axis=0), 0)
+        log_matrix(Af, "Af")
+        Df = -Gf.transpose() * Af
+        log_matrix(Df, "Df")
         G = sparse.csr_matrix(Gf @ P)
-        D = sparse.csr_matrix(np.transpose(P) @ Df)
+        log_matrix(G, "G")
+        D = sparse.csr_matrix(np.transpose(P)) @ Df
+        log_matrix(D, "D")
 
         return M, S, G, D
 
     def generate(self, boundary_reader, obstacle_reader, heat_writer, distance_writer, time_scale=1.0):
+        print("Computing Geodesic Distance using scipy")
+
         self.bm.verts.index_update()
         self.bm.faces.index_update()
 
@@ -243,10 +228,6 @@ class HeatMapGenerator:
             obstacle = obstacle_reader(self.bm)
             vertex_stiffness = 1.0 - obstacle
         M, S, G, D = self.compute_laplacian(vertex_stiffness)
-        log_matrix(M, "M")
-        log_matrix(S, "S")
-        log_matrix(G, "G")
-        log_matrix(D, "D")
 
         # Mean square edge length is used as a "time step" in heat flow solving.
         t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), start=0.0) / len(self.bm.edges) if self.bm.edges else 0.0

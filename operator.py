@@ -177,8 +177,8 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             bm = bmesh.new()
             bm.from_object(obj, depsgraph)
 
-            # heat_map_gen = HeatMapGenerator(bm)
-            heat_map_gen = HeatMapGeneratorOld(bm)
+            heat_map_gen = HeatMapGenerator(bm)
+            # heat_map_gen = HeatMapGeneratorOld(bm)
             heat_map_gen.generate(boundary_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
 
             bm.to_mesh(obj.data)
