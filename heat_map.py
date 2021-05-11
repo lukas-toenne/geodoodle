@@ -192,12 +192,18 @@ class HeatMapGenerator:
                     Gf[idx_g:idx_g+3, idx_c] = (0.5 * normal.cross(ab) / area)[:]
 
             loop_count += len(face.verts)
+        P = sparse.csr_matrix(P)
+        log_matrix(P, "P")
+        Mf = sparse.csr_matrix(Mf)
+        log_matrix(Mf, "Mf")
+        Sf = sparse.csr_matrix(Sf)
+        log_matrix(Sf, "Sf")
         Gf = sparse.csr_matrix(Gf)
         log_matrix(Gf, "Gf")
 
         # Combine into coarse mesh matrices
-        M = sparse.csr_matrix(np.transpose(P) @ (Mf @ P))
-        S = sparse.csr_matrix(np.transpose(P) @ (Sf @ P))
+        M = P.transpose() @ Mf @ P
+        S = P.transpose() @ Sf @ P
         log_matrix(S, "S")
 
         # Diagonalize mass matrix by lumping rows together
@@ -208,9 +214,9 @@ class HeatMapGenerator:
         log_matrix(Af, "Af")
         Df = -Gf.transpose() * Af
         log_matrix(Df, "Df")
-        G = sparse.csr_matrix(Gf @ P)
+        G = Gf @ P
         log_matrix(G, "G")
-        D = sparse.csr_matrix(np.transpose(P)) @ Df
+        D = P.transpose() @ Df
         log_matrix(D, "D")
 
         return M, S, G, D
