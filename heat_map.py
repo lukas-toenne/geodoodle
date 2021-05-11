@@ -167,14 +167,14 @@ class HeatMapGenerator:
             def A_values():
                 for i in range(numverts):
                     for j in range(numverts):
-                        yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), start=0.0)
+                        yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), 0.0)
             A = np.fromiter(A_values(), dtype=float, count=numverts * numverts).reshape(numverts, numverts)
             # Add row of ones to enforce unity
             A = np.vstack((A, np.ones(numverts)))
 
             def b_values():
                 for i, iloop in enumerate(face.loops):
-                    yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), start=0.0)
+                    yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), 0.0)
             b = np.fromiter(b_values(), dtype=float, count=numverts)
             # Add row of ones to enforce unity
             b = np.hstack((b, np.ones(1)))
@@ -184,7 +184,7 @@ class HeatMapGenerator:
 
             # Virtual vertex
             center = Vector(w @ X)
-            stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), start=0.0)
+            stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), 0.0)
 
             # TODO optimize me
             for k, loop in enumerate(face.loops):
@@ -304,7 +304,7 @@ class HeatMapGenerator:
         M, S, G, D = self.compute_laplacian(vertex_stiffness)
 
         # Mean square edge length is used as a "time step" in heat flow solving.
-        t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), start=0.0) / len(self.bm.edges) if self.bm.edges else 0.0
+        t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), 0.0) / len(self.bm.edges) if self.bm.edges else 0.0
 
         # Solve the heat equation: (M - t*S) * u = b
         boundary = boundary_reader(self.bm)
