@@ -259,6 +259,10 @@ class HeatMapGenerator:
                     Sf_builder.append(idx_c, idx_b, 0.0)
                     Sf_builder.append(idx_c, idx_c, 0.0)
 
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_a, idx_a, idx_a], (0.0, 0.0, 0.0))
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_b, idx_b, idx_b], (0.0, 0.0, 0.0))
+                    Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_c, idx_c, idx_c], (0.0, 0.0, 0.0))
+
             loop_count += len(face.verts)
         P = P_builder.construct()
         Mf = Mf_builder.construct()
