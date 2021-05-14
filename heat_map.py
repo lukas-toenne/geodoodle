@@ -219,9 +219,9 @@ class HeatMapGenerator:
                     # Cotan stiffness matrix for triangle mesh
                     stiff_a = vertex_stiffness[idx_a]
                     stiff_b = vertex_stiffness[idx_b]
-                    stiff_ab = 0.25 * abs(bc.dot(ca)) / area * stiff_a * stiff_b
-                    stiff_bc = 0.25 * abs(ca.dot(ab)) / area * stiff_b * stiff_c
-                    stiff_ca = 0.25 * abs(ab.dot(bc)) / area * stiff_c * stiff_a
+                    stiff_ab = -0.25 * bc.dot(ca) / area * stiff_a * stiff_b
+                    stiff_bc = -0.25 * ca.dot(ab) / area * stiff_b * stiff_c
+                    stiff_ca = -0.25 * ab.dot(bc) / area * stiff_c * stiff_a
                     Sf_builder.append(idx_a, idx_a, -stiff_ab - stiff_ca)
                     Sf_builder.append(idx_a, idx_b, stiff_ab)
                     Sf_builder.append(idx_a, idx_c, stiff_ca)
