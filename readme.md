@@ -15,8 +15,8 @@ Geodesic distance describes a shortest path from any point on the surface to som
 
 |||
 |---|---|
-| ![](images/Plane.png) | ![](images/Torus.png) |
-| ![](images/Monkey.png) | ![](images/Island.png) |
+| ![](images/Plane.jpg) | ![](images/Torus.jpg) |
+| ![](images/Monkey.jpg) | ![](images/Island.jpg) |
 
 ## Prerequisites
 
