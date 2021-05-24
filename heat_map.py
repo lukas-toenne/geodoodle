@@ -87,8 +87,6 @@ class HeatMapGenerator:
     # Per-face Laplacian as defined by
     # ALEXA M., WARDETZKY M.: Discrete Laplacians on general polygonal meshes
     def get_face_laplacian_AW11(face):
-        from scipy import linalg
-
         E = self.get_face_edge_matrix(face)
         B = self.get_face_midpoint_matrix(face)
 
@@ -293,7 +291,7 @@ class HeatMapGenerator:
 
         return M, S, G, D
 
-    def generate(self, boundary_reader, obstacle_reader, heat_writer, distance_writer, time_scale=1.0):
+    def generate(self, source_reader, obstacle_reader, heat_writer, distance_writer, time_scale=1.0):
         print("Computing Geodesic Distance using scipy")
 
         self.bm.verts.index_update()
@@ -311,8 +309,8 @@ class HeatMapGenerator:
         t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), 0.0) / len(self.bm.edges) if self.bm.edges else 0.0
 
         # Solve the heat equation: (M - t*S) * u = b
-        boundary = boundary_reader(self.bm)
-        u = sparse.linalg.spsolve(M - t*S, boundary)
+        source = source_reader(self.bm)
+        u = sparse.linalg.spsolve(M - t*S, source)
         log_matrix(u, "u")
         # print(np.array2string(u, max_line_width=500))
 

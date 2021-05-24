@@ -118,10 +118,10 @@ class GeodesicDistanceOperator(bpy.types.Operator):
     bl_label = 'Geodesic Distance'
     bl_options = {'UNDO', 'REGISTER'}
 
-    boundary_vgroup : StringProperty(
-        name="Boundary",
-        description="Vertex group that defines the boundary where geodesic distance is zero",
-        default="Boundary",
+    source_vgroup : StringProperty(
+        name="Source",
+        description="Vertex group that defines the source where geodesic distance is zero",
+        default="Source",
     )
 
     obstacle_vgroup : StringProperty(
@@ -158,9 +158,9 @@ class GeodesicDistanceOperator(bpy.types.Operator):
                 vg = obj.vertex_groups.new(name=name)
             return vg
 
-        boundary_vg = obj.vertex_groups.get(self.boundary_vgroup, None)
-        if boundary_vg is None:
-            self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing boundary vertex group " + self.boundary_vgroup)
+        source_vg = obj.vertex_groups.get(self.source_vgroup, None)
+        if source_vg is None:
+            self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing source vertex group " + self.source_vgroup)
             return {'CANCELLED'}
 
         obstacle_vg = obj.vertex_groups.get(self.obstacle_vgroup, None)
@@ -169,7 +169,7 @@ class GeodesicDistanceOperator(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
         try:
             # Note: Create writers before bm.from_mesh, so data layers are fully initialized
-            boundary_reader = VertexGroupReader(boundary_vg, 0.0)
+            source_reader = VertexGroupReader(source_vg, 0.0)
             obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
             heat_writer = _get_layer_writer(self.heat_output_layers, obj)
             distance_writer = _get_layer_writer(self.distance_output_layers, obj)
@@ -181,7 +181,7 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             heat_map_gen = HeatMapGenerator(bm)
             # heat_map_gen = HeatMapGeneratorOld(bm)
             perf_start = time.perf_counter()
-            heat_map_gen.generate(boundary_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
+            heat_map_gen.generate(source_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
             perf_end = time.perf_counter()
             print("Geodesic Distance computation time: {:0.4f}".format(perf_end - perf_start))
 
@@ -201,7 +201,7 @@ class GeodesicDistanceOperator(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
 
-        layout.prop(self, "boundary_vgroup")
+        layout.prop(self, "source_vgroup")
         layout.prop(self, "obstacle_vgroup")
 
         box = layout.box()

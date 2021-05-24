@@ -11,7 +11,7 @@ Geodesic distance computation for Blender meshes
 
 This addon provides an operator for computing geodesic distances on general meshes (ngons and triangular).
 
-Geodesic distance describes a shortest path from any point on the surface to some boundary, e.g. a selected vertex. It can differ from simple Euclidian distance significantly.
+Geodesic distance describes a shortest path from any point on the surface to some source, e.g. a selected vertex. It can differ from simple Euclidian distance significantly.
 
 |||
 |---|---|
@@ -50,7 +50,7 @@ A convenient method is to use the text editor.
 ## Usage
 
 1. Create a mesh object.
-2. Add a boundary vertex group. The default name should be "Boundary", although the operator can work with arbitrary vertex groups.
+2. Add a source vertex group. The default name should be "Source", although the operator can work with arbitrary vertex groups.
 
    Procedurally generated vertex groups are also supported (e.g. with a proximity modifier). However, topology modifiers such as subdivision are not recommended because the operator will copy the modifier result to the base mesh.
 
