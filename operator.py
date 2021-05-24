@@ -26,7 +26,6 @@ import time
 from bpy.props import *
 from .layers import *
 from .heat_map import HeatMapGenerator
-from .heat_map_old import HeatMapGenerator as HeatMapGeneratorOld
 
 
 # data_type in { 'SCALAR', 'VECTOR' }
@@ -179,7 +178,6 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             bm.from_object(obj, depsgraph)
 
             heat_map_gen = HeatMapGenerator(bm)
-            # heat_map_gen = HeatMapGeneratorOld(bm)
             perf_start = time.perf_counter()
             heat_map_gen.generate(source_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
             perf_end = time.perf_counter()

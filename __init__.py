@@ -34,13 +34,12 @@ bl_info = {
 }
 
 import bpy
-from . import util, heat_map, heat_map_old, layers, operator
+from . import util, heat_map, layers, operator
 
 if "bpy" in locals():
     import importlib
     importlib.reload(util)
     importlib.reload(heat_map)
-    importlib.reload(heat_map_old)
     importlib.reload(layers)
     importlib.reload(operator)
 
