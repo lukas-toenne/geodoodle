@@ -71,40 +71,39 @@ def _make_output_layer_settings(default_name, data_type):
     return OutputLayerSettings
 
 
-def _get_layer_writer(settings, obj):
-    if 'VERTEX_GROUP' in settings.layer_types:
-        vgroup = obj.vertex_groups.get(settings.layer_name, None)
-        if vgroup is None:
-            vgroup = obj.vertex_groups.new(name=settings.layer_name)
-        vgroup_writer = VertexGroupWriter(vgroup)
-    else:
-        vgroup_writer = None
+class CombinedLayerWriter:
+    def __init__(self, settings, obj):
+        if 'VERTEX_GROUP' in settings.layer_types:
+            vgroup = obj.vertex_groups.get(settings.layer_name, None)
+            if vgroup is None:
+                vgroup = obj.vertex_groups.new(name=settings.layer_name)
+            self.vgroup_writer = VertexGroupWriter(vgroup)
+        else:
+            self.vgroup_writer = None
 
-    if 'UV_LAYER' in settings.layer_types:
-        uvlayer = obj.data.uv_layers.get(settings.layer_name, None)
-        if uvlayer is None:
-            uvlayer = obj.data.uv_layers.new(name=settings.layer_name, do_init=False)
-        uvlayer_writer = UVLayerWriter(uvlayer)
-    else:
-        uvlayer_writer = None
+        if 'UV_LAYER' in settings.layer_types:
+            uvlayer = obj.data.uv_layers.get(settings.layer_name, None)
+            if uvlayer is None:
+                uvlayer = obj.data.uv_layers.new(name=settings.layer_name, do_init=False)
+            self.uvlayer_writer = UVLayerWriter(uvlayer)
+        else:
+            self.uvlayer_writer = None
 
-    if 'VERTEX_COLOR' in settings.layer_types:
-        vcol = obj.data.vertex_colors.get(settings.layer_name, None)
-        if vcol is None:
-            vcol = obj.data.vertex_colors.new(name=settings.layer_name, do_init=False)
-        vcol_writer = VertexColorWriter(vcol)
-    else:
-        vcol_writer = None
+        if 'VERTEX_COLOR' in settings.layer_types:
+            vcol = obj.data.vertex_colors.get(settings.layer_name, None)
+            if vcol is None:
+                vcol = obj.data.vertex_colors.new(name=settings.layer_name, do_init=False)
+            self.vcol_writer = VertexColorWriter(vcol)
+        else:
+            self.vcol_writer = None
 
-    def combined_writer(bm, array):
-        if vgroup_writer:
-            vgroup_writer(bm, array)
-        if uvlayer_writer:
-            uvlayer_writer(bm, array)
-        if vcol_writer:
-            vcol_writer(bm, array)
-
-    return combined_writer
+    def write_scalar(self, bm, array):
+        if self.vgroup_writer:
+            self.vgroup_writer.write_scalar(bm, array)
+        if self.uvlayer_writer:
+            self.uvlayer_writer.write_scalar(bm, array)
+        if self.vcol_writer:
+            self.vcol_writer.write_scalar(bm, array)
 
 
 HeatOutputLayerSettings = _make_output_layer_settings("Heat", 'SCALAR')
@@ -170,8 +169,8 @@ class GeodesicDistanceOperator(bpy.types.Operator):
             # Note: Create writers before bm.from_mesh, so data layers are fully initialized
             source_reader = VertexGroupReader(source_vg, 0.0)
             obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
-            heat_writer = _get_layer_writer(self.heat_output_layers, obj)
-            distance_writer = _get_layer_writer(self.distance_output_layers, obj)
+            heat_writer = CombinedLayerWriter(self.heat_output_layers, obj)
+            distance_writer = CombinedLayerWriter(self.distance_output_layers, obj)
 
             depsgraph = context.evaluated_depsgraph_get()
             bm = bmesh.new()

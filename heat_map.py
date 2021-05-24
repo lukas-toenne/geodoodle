@@ -301,7 +301,7 @@ class HeatMapGenerator:
         if obstacle_reader is None:
             vertex_stiffness = np.ones(len(self.bm.verts))
         else:
-            obstacle = obstacle_reader(self.bm)
+            obstacle = obstacle_reader.read_scalar(self.bm)
             vertex_stiffness = 1.0 - obstacle
         M, S, G, D = self.compute_laplacian(vertex_stiffness)
 
@@ -309,12 +309,12 @@ class HeatMapGenerator:
         t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in self.bm.edges), 0.0) / len(self.bm.edges) if self.bm.edges else 0.0
 
         # Solve the heat equation: (M - t*S) * u = b
-        source = source_reader(self.bm)
+        source = source_reader.read_scalar(self.bm)
         u = sparse.linalg.spsolve(M - t*S, source)
         log_matrix(u, "u")
         # print(np.array2string(u, max_line_width=500))
 
-        heat_writer(self.bm, u)
+        heat_writer.write_scalar(self.bm, u)
 
         # Normalized gradient
         g = G @ u
@@ -326,4 +326,4 @@ class HeatMapGenerator:
         d = sparse.linalg.spsolve(S, D @ g.flatten())
         d -= np.amin(d)
         log_matrix(d, "d")
-        distance_writer(self.bm, d)
+        distance_writer.write_scalar(self.bm, d)

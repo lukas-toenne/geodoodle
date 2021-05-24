@@ -30,7 +30,7 @@ class VertexGroupReader:
         self.vgroup = vgroup
         self.default_weight = default_weight
 
-    def __call__(self, bm):
+    def read_scalar(self, bm):
         def values():
             dvert_lay = bm.verts.layers.deform.verify()
             idx = self.vgroup.index
@@ -44,7 +44,7 @@ class VertexGroupWriter:
     def __init__(self, vgroup : bpy.types.VertexGroup):
         self.vgroup = vgroup
 
-    def __call__(self, bm, array):
+    def write_scalar(self, bm, array):
         assert(array.size == len(bm.verts))
         dvert_lay = bm.verts.layers.deform.verify()
         idx = self.vgroup.index
@@ -57,7 +57,7 @@ class UVLayerWriter:
     def __init__(self, uvlayer : bpy.types.MeshUVLoopLayer):
         self.uvlayer = uvlayer
 
-    def __call__(self, bm, array):
+    def write_scalar(self, bm, array):
         assert(array.size == len(bm.verts))
         uv_lay = bm.loops.layers.uv.get(self.uvlayer.name)
         for value, vert in zip(np.nditer(array), bm.verts):
@@ -69,7 +69,7 @@ class VertexColorWriter:
     def __init__(self, vcol : bpy.types.MeshLoopColorLayer):
         self.vcol = vcol
 
-    def __call__(self, bm, array):
+    def write_scalar(self, bm, array):
         assert(array.size == len(bm.verts))
         vcol_lay = bm.loops.layers.color.get(self.vcol.name)
         array_iter = np.nditer(array)
