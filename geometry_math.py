@@ -314,10 +314,45 @@ def compute_distance(bm, source_reader, obstacle_reader, distance_writer):
     return M, S, G, D, u, d
 
 
+# Project 3D vectors onto the surface using vertex normals.
+# Returns 2D surface vectors, encoded as complex numbers,
+# as well as the scalar normal components.
+def project_vectors_on_surface(bm, vectors):
+    totverts = len(bm.verts)
+    totloops = sum(len(v.link_loops) for v in bm.verts)
+    assert(vectors.size == 3 * totverts)
+
+    vertnormals = np.fromiter((
+        c
+        for v in bm.verts
+        for c in v.normal[:]
+        ), dtype=float, count=totverts * 3).reshape((totverts, 3))
+    loopnormals = np.fromiter((
+        c
+        for v in bm.verts
+        for l in v.link_loops
+        for c in (l.link_loop_next.vert.co - l.vert.co).cross((l.link_loop_prev.vert.co - l.vert.co)).normalized()[:]
+        ), dtype=float, count=totloops * 3).reshape((totloops, 3))
+
+    # def values():
+    #     vec_iter = np.nditer(vectors)
+    #     for vert in bm.verts:
+    #         vec = Vector((next(vec_iter), next(vec_iter), next(vec_iter)))
+    #         z = vec.dot(vert.normal)
+    #         xy = vec - vert.normal * z
+
+    #         # Determine on which corner of the adjacent triangles the vector is projected.
+    #         # The normalized angle is computed according to the method described in section 5.2 of
+    #         # "The Vector Heat Method" (Sharp et al.)
+    #         for loop in vert.link_loops:
+
+
 def compute_parallel_transport(bm, source_reader, obstacle_reader, vector_writer):
     numverts = len(bm.verts)
 
     source = source_reader.read_vector(bm)
+
+    project_vectors_on_surface(bm, source)
 
     vector_writer.write_vector(bm, source)
 
