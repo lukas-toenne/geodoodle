@@ -30,32 +30,30 @@ from scipy.sparse import linalg
 from dataclasses import dataclass
 
 
-def get_face_edge_matrix(face):
-    numedges = len(face.loops)
-    def values():
-        for loop in face.loops:
-            E = loop.link_loop_next.vert.co - loop.vert.co
-            yield from E
-    E = np.fromiter(values(), dtype=float, count=numedges * 3)
-    E.shape = numedges, 3
-    return E
-
-
-def get_face_midpoint_matrix(face):
-    numedges = len(face.loops)
-    def values():
-        for loop in face.loops:
-            B = 0.5 * (loop.link_loop_next.vert.co + loop.vert.co)
-            yield from B
-    B = np.fromiter(values(), dtype=float, count=numedges * 3)
-    B.shape = numedges, 3
-    return B
-
-
 # UNUSED
 # Per-face Laplacian as defined by
 # ALEXA M., WARDETZKY M.: Discrete Laplacians on general polygonal meshes
 def get_face_laplacian_AW11(face):
+    def get_face_edge_matrix(face):
+        numedges = len(face.loops)
+        def values():
+            for loop in face.loops:
+                E = loop.link_loop_next.vert.co - loop.vert.co
+                yield from E
+        E = np.fromiter(values(), dtype=float, count=numedges * 3)
+        E.shape = numedges, 3
+        return E
+
+    def get_face_midpoint_matrix(face):
+        numedges = len(face.loops)
+        def values():
+            for loop in face.loops:
+                B = 0.5 * (loop.link_loop_next.vert.co + loop.vert.co)
+                yield from B
+        B = np.fromiter(values(), dtype=float, count=numedges * 3)
+        B.shape = numedges, 3
+        return B
+
     E = get_face_edge_matrix(face)
     B = get_face_midpoint_matrix(face)
 
@@ -273,15 +271,12 @@ def compute_laplacian(bm, vertex_stiffness):
 
 
 def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
+    numverts = len(bm.verts)
     bm.verts.index_update()
     bm.faces.index_update()
 
     # Build Laplacian
-    if obstacle_reader is None:
-        vertex_stiffness = np.ones(len(bm.verts))
-    else:
-        obstacle = obstacle_reader.read_scalar(bm)
-        vertex_stiffness = 1.0 - obstacle
+    vertex_stiffness = 1.0 - obstacle_reader.read_scalar(bm) if obstacle_reader else np.ones(numverts)
     M, S, G, D = compute_laplacian(bm, vertex_stiffness)
 
     # Mean square edge length is used as a "time step" in heat flow solving.
@@ -297,6 +292,7 @@ def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0
         heat_writer.write_scalar(bm, u)
 
     return M, S, G, D, u
+
 
 def compute_distance(bm, source_reader, obstacle_reader, distance_writer):
     M, S, G, D, u = compute_heat(bm, source_reader, obstacle_reader, None)
@@ -316,3 +312,29 @@ def compute_distance(bm, source_reader, obstacle_reader, distance_writer):
         distance_writer.write_scalar(bm, d)
 
     return M, S, G, D, u, d
+
+
+def compute_parallel_transport(bm, source_reader, obstacle_reader, vector_writer):
+    numverts = len(bm.verts)
+
+    source = source_reader.read_vector(bm)
+
+    vector_writer.write_vector(bm, source)
+
+    # M, S, G, D, u = compute_heat(bm, source_reader, obstacle_reader, None)
+
+    # # Normalized gradient
+    # g = G @ u
+    # g = np.reshape(g, (-1, 3))
+    # gnorm = np.expand_dims(np.linalg.norm(g, axis=1), axis=1)
+    # g = -np.divide(g, gnorm, out=np.zeros_like(g), where=gnorm!=0)
+    # log_matrix(g, "g")
+
+    # d = sparse.linalg.spsolve(S, D @ g.flatten())
+    # d -= np.amin(d)
+    # log_matrix(d, "d")
+
+    # if distance_writer:
+    #     distance_writer.write_scalar(bm, d)
+
+    # return M, S, G, D, u, d

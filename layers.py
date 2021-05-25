@@ -97,5 +97,35 @@ class TextureReader:
         def values():
             for vert in bm.verts:
                 co = self.mat @ vert.co
-                yield self.tex.evaluate(co)[0:3]
-        return np.fromiter(values(), dtype=float, count=len(bm.verts))
+                yield from self.tex.evaluate(co)[0:3]
+        return np.fromiter(values(), dtype=float, count=3*len(bm.verts)).reshape((len(bm.verts), 3))
+
+
+class ScaledTextureReader:
+    def __init__(self, tex_reader, scale_reader):
+        self.tex_reader = tex_reader
+        self.scale_reader = scale_reader
+
+    def read_vector(self, bm):
+        scale = self.scale_reader.read_scalar(bm)
+        tex = self.tex_reader.read_vector(bm)
+        return (tex * 2.0 - 1.0) * scale[:,None]
+
+
+class DualUVLayerWriter:
+    def __init__(self, uvlayer_xy : bpy.types.MeshUVLoopLayer, uvlayer_z : bpy.types.MeshUVLoopLayer):
+        self.uvlayer_xy = uvlayer_xy
+        self.uvlayer_z = uvlayer_z
+
+    def write_vector(self, bm, array):
+        assert(array.size == 3 * len(bm.verts))
+        uv_xy_lay = bm.loops.layers.uv.get(self.uvlayer_xy.name)
+        uv_z_lay = bm.loops.layers.uv.get(self.uvlayer_z.name)
+        array_iter = np.nditer(array)
+        for vert in bm.verts:
+            x = next(array_iter)
+            y = next(array_iter)
+            z = next(array_iter)
+            for loop in vert.link_loops:
+                loop[uv_xy_lay].uv = Vector((x, y))
+                loop[uv_z_lay].uv = Vector((z, 0.0))
