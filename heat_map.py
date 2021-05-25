@@ -59,6 +59,7 @@ class CooBuilder:
         self.data[self.index:self.index+count] = data[:]
         self.index += count
 
+
 class HeatMapGenerator:
     def __init__(self, bm):
         self.bm = bm
@@ -291,9 +292,7 @@ class HeatMapGenerator:
 
         return M, S, G, D
 
-    def generate(self, source_reader, obstacle_reader, heat_writer, distance_writer, time_scale=1.0):
-        print("Computing Geodesic Distance using scipy")
-
+    def compute_heat(self, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
         self.bm.verts.index_update()
         self.bm.faces.index_update()
 
@@ -314,7 +313,13 @@ class HeatMapGenerator:
         log_matrix(u, "u")
         # print(np.array2string(u, max_line_width=500))
 
-        heat_writer.write_scalar(self.bm, u)
+        if heat_writer:
+            heat_writer.write_scalar(self.bm, u)
+
+        return M, S, G, D, u
+
+    def compute_distance(self, source_reader, obstacle_reader, distance_writer):
+        M, S, G, D, u = self.compute_heat(source_reader, obstacle_reader, None)
 
         # Normalized gradient
         g = G @ u
@@ -326,4 +331,6 @@ class HeatMapGenerator:
         d = sparse.linalg.spsolve(S, D @ g.flatten())
         d -= np.amin(d)
         log_matrix(d, "d")
-        distance_writer.write_scalar(self.bm, d)
+
+        if distance_writer:
+            distance_writer.write_scalar(self.bm, d)

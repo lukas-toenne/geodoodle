@@ -24,6 +24,7 @@ import bpy
 import bmesh
 import time
 from bpy.props import *
+from contextlib import contextmanager
 from .layers import *
 from .heat_map import HeatMapGenerator
 
@@ -110,10 +111,47 @@ HeatOutputLayerSettings = _make_output_layer_settings("Heat", 'SCALAR')
 DistanceOutputLayerSettings = _make_output_layer_settings("Distance", 'SCALAR')
 
 
-class GeodesicDistanceOperator(bpy.types.Operator):
-    """Generate mesh attributes for geodesic distance."""
-    bl_idname = 'mesh.geodesic_distance'
-    bl_label = 'Geodesic Distance'
+class GeoDoodleOperatorBase(bpy.types.Operator):
+    @staticmethod
+    def ensure_vgroup(obj, name):
+        vg = obj.vertex_groups.get(name, None)
+        if vg is None:
+            vg = obj.vertex_groups.new(name=name)
+        return vg
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj and obj.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+
+        orig_mode = obj.mode
+        bpy.ops.object.mode_set(mode='OBJECT')
+        try:
+            with self.get_generator(obj) as generator:
+                depsgraph = context.evaluated_depsgraph_get()
+                bm = bmesh.new()
+                bm.from_object(obj, depsgraph)
+                generator(bm)
+                bm.to_mesh(obj.data)
+                bm.free()
+            obj.data.update()
+        finally:
+            bpy.ops.object.mode_set(mode=orig_mode)
+
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+
+
+class HeatMapOperator(GeoDoodleOperatorBase):
+    """Generate mesh attributes for a heat map."""
+    bl_idname = 'geodoodle.heat_map'
+    bl_label = 'Heat Map'
     bl_options = {'UNDO', 'REGISTER'}
 
     source_vgroup : StringProperty(
@@ -129,7 +167,6 @@ class GeodesicDistanceOperator(bpy.types.Operator):
     )
 
     heat_output_layers : PointerProperty(type=HeatOutputLayerSettings)
-    distance_output_layers : PointerProperty(type=DistanceOutputLayerSettings)
 
     heat_time_scale : FloatProperty(
         name="Time Scale",
@@ -142,20 +179,9 @@ class GeodesicDistanceOperator(bpy.types.Operator):
         subtype='FACTOR',
     )
 
-    @classmethod
-    def poll(cls, context):
-        obj = context.active_object
-        return obj and obj.type == 'MESH'
-
-    def execute(self, context):
-        obj = context.active_object
-
-        def ensure_vgroup(name):
-            vg = obj.vertex_groups.get(name, None)
-            if vg is None:
-                vg = obj.vertex_groups.new(name=name)
-            return vg
-
+    @contextmanager
+    def get_generator(self, obj):
+        # Note: Create writers before bm.from_mesh, so data layers are fully initialized
         source_vg = obj.vertex_groups.get(self.source_vgroup, None)
         if source_vg is None:
             self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing source vertex group " + self.source_vgroup)
@@ -163,37 +189,18 @@ class GeodesicDistanceOperator(bpy.types.Operator):
 
         obstacle_vg = obj.vertex_groups.get(self.obstacle_vgroup, None)
 
-        orig_mode = obj.mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-        try:
-            # Note: Create writers before bm.from_mesh, so data layers are fully initialized
-            source_reader = VertexGroupReader(source_vg, 0.0)
-            obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
-            heat_writer = CombinedLayerWriter(self.heat_output_layers, obj)
-            distance_writer = CombinedLayerWriter(self.distance_output_layers, obj)
+        source_reader = VertexGroupReader(source_vg, 0.0)
+        obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
+        heat_writer = CombinedLayerWriter(self.heat_output_layers, obj)
 
-            depsgraph = context.evaluated_depsgraph_get()
-            bm = bmesh.new()
-            bm.from_object(obj, depsgraph)
-
+        def apply(bm):
             heat_map_gen = HeatMapGenerator(bm)
             perf_start = time.perf_counter()
-            heat_map_gen.generate(source_reader, obstacle_reader, heat_writer, distance_writer, self.heat_time_scale)
+            heat_map_gen.compute_heat(source_reader, obstacle_reader, heat_writer, self.heat_time_scale)
             perf_end = time.perf_counter()
-            print("Geodesic Distance computation time: {:0.4f}".format(perf_end - perf_start))
+            print("Heat map computation time: {:0.4f}".format(perf_end - perf_start))
 
-            bm.to_mesh(obj.data)
-            bm.free()
-            obj.data.update()
-
-        finally:
-            bpy.ops.object.mode_set(mode=orig_mode)
-
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self)
+        yield apply
 
     def draw(self, context):
         layout = self.layout
@@ -205,18 +212,70 @@ class GeodesicDistanceOperator(bpy.types.Operator):
         self.heat_output_layers.draw(context, box, text="Heat Output:")
         box.prop(self, "heat_time_scale")
 
+
+class GeodesicDistanceOperator(GeoDoodleOperatorBase):
+    """Generate mesh attributes for geodesic distance."""
+    bl_idname = 'geodoodle.geodesic_distance'
+    bl_label = 'Geodesic Distance'
+    bl_options = {'UNDO', 'REGISTER'}
+
+    source_vgroup : StringProperty(
+        name="Source",
+        description="Vertex group that defines the source where geodesic distance is zero",
+        default="Source",
+    )
+
+    obstacle_vgroup : StringProperty(
+        name="Obstacle",
+        description="Vertex group that artificially locally decreases geodesic distance",
+        default="Obstacle",
+    )
+
+    distance_output_layers : PointerProperty(type=DistanceOutputLayerSettings)
+
+    @contextmanager
+    def get_generator(self, obj):
+        # Note: Create writers before bm.from_mesh, so data layers are fully initialized
+        source_vg = obj.vertex_groups.get(self.source_vgroup, None)
+        if source_vg is None:
+            self.report({'ERROR_INVALID_CONTEXT'}, "Object is missing source vertex group " + self.source_vgroup)
+            return {'CANCELLED'}
+
+        obstacle_vg = obj.vertex_groups.get(self.obstacle_vgroup, None)
+
+        source_reader = VertexGroupReader(source_vg, 0.0)
+        obstacle_reader = VertexGroupReader(obstacle_vg, 0.0) if obstacle_vg else None
+        distance_writer = CombinedLayerWriter(self.distance_output_layers, obj)
+
+        def apply(bm):
+            heat_map_gen = HeatMapGenerator(bm)
+            perf_start = time.perf_counter()
+            heat_map_gen.compute_distance(source_reader, obstacle_reader, distance_writer)
+            perf_end = time.perf_counter()
+            print("Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
+
+        yield apply
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(self, "source_vgroup")
+        layout.prop(self, "obstacle_vgroup")
+
         box = layout.box()
         self.distance_output_layers.draw(context, box, text="Distance Output:")
 
 
 def menu_func(self, context):
     self.layout.separator()
+    props = self.layout.operator(HeatMapOperator.bl_idname)
     props = self.layout.operator(GeodesicDistanceOperator.bl_idname)
 
 
 def register():
     bpy.utils.register_class(HeatOutputLayerSettings)
     bpy.utils.register_class(DistanceOutputLayerSettings)
+    bpy.utils.register_class(HeatMapOperator)
     bpy.utils.register_class(GeodesicDistanceOperator)
     bpy.types.MESH_MT_vertex_group_context_menu.append(menu_func)
     bpy.types.VIEW3D_MT_paint_weight.append(menu_func)
@@ -225,6 +284,7 @@ def register():
 def unregister():
     bpy.utils.unregister_class(HeatOutputLayerSettings)
     bpy.utils.unregister_class(DistanceOutputLayerSettings)
+    bpy.utils.unregister_class(HeatMapOperator)
     bpy.utils.unregister_class(GeodesicDistanceOperator)
     bpy.types.MESH_MT_vertex_group_context_menu.remove(menu_func)
     bpy.types.VIEW3D_MT_paint_weight.remove(menu_func)
