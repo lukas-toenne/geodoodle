@@ -23,7 +23,7 @@
 import bpy
 import bmesh
 import numpy as np
-from mathutils import Color, Vector
+from mathutils import Color, Matrix, Vector
 
 class VertexGroupReader:
     def __init__(self, vgroup : bpy.types.VertexGroup, default_weight):
@@ -79,3 +79,23 @@ class VertexColorWriter:
             z = next(array_iter)
             for loop in vert.link_loops:
                 loop[vcol_lay].color = Color((x, y, z))
+
+
+class TextureReader:
+    def __init__(self, tex : bpy.types.Texture, mat : Matrix):
+        self.tex = tex
+        self.mat = mat
+
+    def read_scalar(self, bm):
+        def values():
+            for vert in bm.verts:
+                co = self.mat @ vert.co
+                yield self.tex.evaluate(co)[0]
+        return np.fromiter(values(), dtype=float, count=len(bm.verts))
+
+    def read_vector(self, bm):
+        def values():
+            for vert in bm.verts:
+                co = self.mat @ vert.co
+                yield self.tex.evaluate(co)[0:3]
+        return np.fromiter(values(), dtype=float, count=len(bm.verts))

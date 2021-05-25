@@ -21,6 +21,39 @@
 # SOFTWARE.
 
 import numpy as np
+from scipy import sparse
+
+# Utility class for building a sparse coordinate matrix.
+class CooBuilder:
+    def __init__(self, shape, entries, dtype=float):
+        self.shape = shape
+        self.entries = entries
+        self.rows = np.empty(entries, dtype=int)
+        self.cols = np.empty(entries, dtype=int)
+        self.data = np.empty(entries, dtype=dtype)
+        self.index = 0
+
+    def construct(self):
+        assert(self.index == self.entries)
+        return sparse.coo_matrix((self.data, (self.rows, self.cols)), shape=self.shape)
+
+    def append(self, row, col, data):
+        assert(self.index < self.entries)
+        self.rows[self.index] = row
+        self.cols[self.index] = col
+        self.data[self.index] = data
+        self.index += 1
+
+    def extend(self, rows, cols, data):
+        count = len(data)
+        assert(len(rows) == count)
+        assert(len(cols) == count)
+        assert(self.index < self.entries)
+        self.rows[self.index:self.index+count] = rows[:]
+        self.cols[self.index:self.index+count] = cols[:]
+        self.data[self.index:self.index+count] = data[:]
+        self.index += count
+
 
 def log_matrix(m, name):
     if isinstance(m, np.ndarray):

@@ -26,7 +26,7 @@ import time
 from bpy.props import *
 from contextlib import contextmanager
 from .layers import *
-from .heat_map import HeatMapGenerator
+from . import geometry_math
 
 
 # data_type in { 'SCALAR', 'VECTOR' }
@@ -194,9 +194,8 @@ class HeatMapOperator(GeoDoodleOperatorBase):
         heat_writer = CombinedLayerWriter(self.heat_output_layers, obj)
 
         def apply(bm):
-            heat_map_gen = HeatMapGenerator(bm)
             perf_start = time.perf_counter()
-            heat_map_gen.compute_heat(source_reader, obstacle_reader, heat_writer, self.heat_time_scale)
+            geometry_math.compute_heat(bm, source_reader, obstacle_reader, heat_writer, self.heat_time_scale)
             perf_end = time.perf_counter()
             print("Heat map computation time: {:0.4f}".format(perf_end - perf_start))
 
@@ -248,9 +247,8 @@ class GeodesicDistanceOperator(GeoDoodleOperatorBase):
         distance_writer = CombinedLayerWriter(self.distance_output_layers, obj)
 
         def apply(bm):
-            heat_map_gen = HeatMapGenerator(bm)
             perf_start = time.perf_counter()
-            heat_map_gen.compute_distance(source_reader, obstacle_reader, distance_writer)
+            geometry_math.compute_distance(bm, source_reader, obstacle_reader, distance_writer)
             perf_end = time.perf_counter()
             print("Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
 
