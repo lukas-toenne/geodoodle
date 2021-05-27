@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 import bpy
-from math import sqrt
+from math import sqrt, cos, sin
 from mathutils import Vector
 from .util import *
 import numpy as np
@@ -72,6 +72,21 @@ def get_face_laplacian_AW11(face):
     Mf = M + C @ U @ np.transpose(C)
 
     return Mf
+
+
+# # Connected neighborhood around the vertex following same ordering as loops.
+# def vertex_neighbors(vert):
+#     prev_opposing = None
+#     for loop in vert.link_loops:
+#         loopvert = loop.link_loop_next.vert
+
+#         # Also yield the opposing edge in case there is a gap in link_loops
+#         if prev_opposing and prev_opposing != loopvert:
+#             yield prev_opposing
+
+#         yield loopvert
+
+#         prev_opposing = loop.link_loop_prev.vert
 
 
 # @dataclass
@@ -322,39 +337,109 @@ def project_vectors_on_surface(bm, vectors):
     totloops = sum(len(v.link_loops) for v in bm.verts)
     assert(vectors.size == 3 * totverts)
 
-    vertnormals = np.fromiter((
-        c
-        for v in bm.verts
-        for c in v.normal[:]
-        ), dtype=float, count=totverts * 3).reshape((totverts, 3))
-    loopnormals = np.fromiter((
-        c
-        for v in bm.verts
-        for l in v.link_loops
-        for c in (l.link_loop_next.vert.co - l.vert.co).cross((l.link_loop_prev.vert.co - l.vert.co)).normalized()[:]
-        ), dtype=float, count=totloops * 3).reshape((totloops, 3))
+    # vertnormals = np.fromiter((
+    #     c
+    #     for v in bm.verts
+    #     for c in v.normal[:]
+    #     ), dtype=float, count=totverts * 3).reshape((totverts, 3))
+    # edgenormals = np.fromiter((
+    #     c
+    #     for e in bm.edges
+    #     for l in v.link_loops
+    #     for c in (l.link_loop_next.vert.co - l.vert.co).cross((l.link_loop_prev.vert.co - l.vert.co)).normalized()[:]
+    #     ), dtype=float, count=totloops * 3).reshape((totloops, 3))
+    # loopnormals = np.fromiter((
+    #     c
+    #     for v in bm.verts
+    #     for l in v.link_loops
+    #     for c in (l.link_loop_next.vert.co - l.vert.co).cross((l.link_loop_prev.vert.co - l.vert.co)).normalized()[:]
+    #     ), dtype=float, count=totloops * 3).reshape((totloops, 3))
 
-    # def values():
-    #     vec_iter = np.nditer(vectors)
-    #     for vert in bm.verts:
-    #         vec = Vector((next(vec_iter), next(vec_iter), next(vec_iter)))
-    #         z = vec.dot(vert.normal)
-    #         xy = vec - vert.normal * z
+    def values():
+        vec_iter = np.nditer(vectors)
+        for vert in bm.verts:
+            vec = Vector((next(vec_iter), next(vec_iter), next(vec_iter)))
+            z = vec.dot(vert.normal)
+            xy = vec - vert.normal * z
 
-    #         # Determine on which corner of the adjacent triangles the vector is projected.
-    #         # The normalized angle is computed according to the method described in section 5.2 of
-    #         # "The Vector Heat Method" (Sharp et al.)
-    #         for loop in vert.link_loops:
+            # Determine on which corner of the adjacent triangles the vector is projected.
+            # The normalized angle is computed according to the method described in section 5.2 of
+            # "The Vector Heat Method" (Sharp et al.)
+            neighbor = list(loop.link_loop_next.vert.co for loop in vert.link_loops)
+            neighbor_next = neighbor[1:] + neighbor[0]
+            neighbor_prev = neighbor[-1] + neighbor[:-1]
+            for nco, nco_prev, nco_next in zip(neighbor, neighbor_prev, neighbor_next):
+                # Edge normal: sum of left and right triangles,
+                # directly computed from neighbor vertex locations.
+                # Not normalized because we only need to know inside/outside.
+                edgenor = (nco - vert.co).cross(nco_next - nco_prev)
 
+
+
+# Compute 3D vectors from surface vectors.
+# Surface vectors are given as complex numbers, relative to local vertex neighborhood.
+# Offset numbers are scalar values in the vertex normal direction.
+def surface_vectors_to_world(bm, surface_vectors):
+    totverts = len(bm.verts)
+    totloops = sum(len(v.link_loops) for v in bm.verts)
+    assert(surface_vectors.size == totverts)
+
+    def values():
+        angles = np.angle(surface_vectors)
+        lengths = np.absolute(surface_vectors)
+
+        angle_iter = np.nditer(angles)
+        length_iter = np.nditer(lengths)
+        for vert in bm.verts:
+            numedges = len(vert.link_edges)
+            neighbor_edges = np.fromiter((
+                c
+                for e in vert.link_edges
+                for c in (e.other_vert(vert).co - vert.co)[:]
+                ), dtype=float, count=numedges * 3).reshape((numedges, 3))
+            neighbor_edge_lengths = np.linalg.norm(neighbor_edges, axis=1)
+            neighbor_edges = np.divide(neighbor_edges, neighbor_edge_lengths[:,None], out=np.zeros_like(neighbor_edges), where=neighbor_edge_lengths[:,None] != 0)
+            neighbor_next = np.roll(neighbor_edges, shift=-1, axis=0)
+
+            loop_angle_sin = np.linalg.norm(np.cross(neighbor_edges, neighbor_next), axis=1)
+            loop_angle_cos = np.sum(neighbor_edges * neighbor_next, axis=1)
+            loop_angles_raw = np.arctan2(loop_angle_sin, loop_angle_cos)
+            totangle = np.sum(loop_angles_raw)
+            if totangle == 0:
+                print(neighbor_edges)
+            loop_angles = loop_angles_raw / totangle if totangle != 0 else np.zeros_like(loop_angles_raw)
+            loop_angle_max = np.cumsum(loop_angles)
+            loop_angle_min = np.concatenate(([0.0], loop_angle_max[:-1]))
+
+            angle = next(angle_iter)
+            length = next(length_iter)
+
+            active_loop_index = np.argwhere(np.logical_and(loop_angle_min <= angle, loop_angle_max > angle))
+            active_index = active_loop_index[0] if active_loop_index else -1
+            angle_min = loop_angle_min[active_index]
+            angle_max = loop_angle_max[active_index]
+            raw_angle = loop_angles_raw[active_index]
+            raw_angle_sin = loop_angle_sin[active_index]
+            edge_min = neighbor_edges[active_index]
+            edge_max = neighbor_next[active_index]
+
+            # Slerp
+            t = (angle - angle_min) / (angle_max - angle_min)
+            yield from (sin((1.0 - t) * raw_angle) * edge_min + sin(t * raw_angle) * edge_max) / raw_angle_sin * length
+
+    return np.fromiter(values(), dtype=float, count=3 * totverts).reshape(totverts, 3)
 
 def compute_parallel_transport(bm, source_reader, obstacle_reader, vector_writer):
-    numverts = len(bm.verts)
+    totverts = len(bm.verts)
 
     source = source_reader.read_vector(bm)
 
-    project_vectors_on_surface(bm, source)
+    # project_vectors_on_surface(bm, source)
 
-    vector_writer.write_vector(bm, source)
+    surface_vectors = np.full(totverts, 0.255 + 1.63j, dtype=complex)
+    world_vectors = surface_vectors_to_world(bm, surface_vectors)
+
+    vector_writer.write_vector(bm, world_vectors)
 
     # M, S, G, D, u = compute_heat(bm, source_reader, obstacle_reader, None)
 
