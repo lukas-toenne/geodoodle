@@ -34,7 +34,7 @@ bl_info = {
 }
 
 import bpy
-from . import util, geometry_math, layers, operator
+from . import util, geometry_math, layers, operator, surface_vector
 
 if "bpy" in locals():
     import importlib
@@ -42,6 +42,7 @@ if "bpy" in locals():
     importlib.reload(geometry_math)
     importlib.reload(layers)
     importlib.reload(operator)
+    importlib.reload(surface_vector)
 
 
 scipy_found = False
