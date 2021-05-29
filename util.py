@@ -54,6 +54,16 @@ class CooBuilder:
         self.data[self.index:self.index+count] = data[:]
         self.index += count
 
+    def extend_np(self, rows, cols, data):
+        count = data.size
+        assert(rows.size == count)
+        assert(cols.size == count)
+        assert(self.index < self.entries)
+        self.rows[self.index:self.index+count] = rows[:]
+        self.cols[self.index:self.index+count] = cols[:]
+        self.data[self.index:self.index+count] = data[:]
+        self.index += count
+
 
 def log_matrix(m, name):
     if isinstance(m, np.ndarray):

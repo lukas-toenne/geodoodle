@@ -119,54 +119,14 @@ def compute_laplacian(bm, vertex_stiffness):
     # Gradient operator Gf: computes per-loop gradient vector from a scalar field.
     Gf_builder = CooBuilder(shape=(refinedfaces * 3, refinedverts), entries=9*totloops, dtype=float)
 
-    loop_count = 0
-    for face in bm.faces:
-        numverts = len(face.verts)
-        # TODO virtual vertex only needed for polygons, handle triangles with simple cotan
 
-        def X_values():
-            for loop in face.loops:
-                yield from loop.vert.co
-        X = np.fromiter(X_values(), dtype=float, count=numverts * 3).reshape(numverts, 3)
+    # Slow method of adding laplacian elements for a face with an explicit loop
+    def add_face_laplacian_loopy(bm, face, center, weights, loop_count):
+        totverts = len(bm.verts)
 
-        # Solve minimization problem to determine weights for the virtual vertex.
-        # This computes weights such that the squared area of the fan triangles is minimized.
-        # See the paper for details: Bunge et al., Polygon Laplacian Made Simple
-
-        # Cached cross products
-        def C_values():
-            for iloop in face.loops:
-                for jloop in face.loops:
-                    yield from iloop.vert.co.cross(jloop.vert.co)
-        C = np.fromiter(C_values(), dtype=float, count=numverts * numverts * 3).reshape(numverts, numverts, 3)
-        Cnext = np.roll(C, -1, axis=1)
-
-        def A_values():
-            for i in range(numverts):
-                for j in range(numverts):
-                    yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), 0.0)
-        A = np.fromiter(A_values(), dtype=float, count=numverts * numverts).reshape(numverts, numverts)
-        # Add row of ones to enforce unity
-        A = np.vstack((A, np.ones(numverts)))
-
-        def b_values():
-            for i, iloop in enumerate(face.loops):
-                yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), 0.0)
-        b = np.fromiter(b_values(), dtype=float, count=numverts)
-        # Add row of ones to enforce unity
-        b = np.hstack((b, np.ones(1)))
-
-        # Solve weights
-        w, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
-
-        # Virtual vertex
-        center = Vector(w @ X)
-        stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), 0.0)
-
-        # TODO optimize me
         for k, loop in enumerate(face.loops):
             loop_idx = loop_count + k
-            P_builder.append(totverts + face.index, loop.vert.index, w[k])
+            P_builder.append(totverts + face.index, loop.vert.index, weights[k])
 
             idx_a = loop.vert.index
             idx_b = loop.link_loop_next.vert.index
@@ -239,6 +199,126 @@ def compute_laplacian(bm, vertex_stiffness):
                 Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_a, idx_a, idx_a], (0.0, 0.0, 0.0))
                 Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_b, idx_b, idx_b], (0.0, 0.0, 0.0))
                 Gf_builder.extend([idx_g+0, idx_g+1, idx_g+2], [idx_c, idx_c, idx_c], (0.0, 0.0, 0.0))
+
+    # Per-face Laplacian entries using numpy arrays instead of for loop.
+    # Actually slower than the loopy version above, probably only better for extreme ngons.
+    # Eventually avoiding looping over faces entirely could amortize this again,
+    # this variant of computing face entries is a step in that direction.
+    #
+    # Cross products on small arrays of 3-vectors have quite a bit of overhead,
+    # might try replacing with explicit add/mul, but could also work better for full-mesh arrays.
+    def add_face_laplacian_np(bm, face, center, weights, loop_count):
+        numverts = len(face.verts)
+
+        idx_a = np.fromiter((loop.vert.index for loop in face.loops), dtype=int, count=numverts)
+        idx_b = np.roll(idx_a, -1)
+        idx_c = np.full(numverts, face.index + totverts)
+
+        P_builder.extend(idx_c, idx_a, weights)
+
+        loop_verts = np.fromiter((c for loop in face.loops for c in loop.vert.co[:]), dtype=float, count=numverts * 3).reshape(numverts, 3)
+        loop_verts_next = np.roll(loop_verts, -1, axis=0)
+        ab = loop_verts_next - loop_verts
+        bc = center[None,:] - loop_verts_next
+        ca = loop_verts - center[None,:]
+
+        normal = -np.cross(ca, bc)
+        norlen = np.linalg.norm(normal, axis=1)
+        normal = np.divide(normal, norlen[:,None], out=np.zeros_like(normal), where=norlen[:,None] != 0.0)
+        area = norlen / 2
+
+        # Area of the fan triangles contributes to face verts and the virtual center vert
+        mass = area / 12 # 1/12 contribution to each corner
+        Mf_builder.extend_np(idx_a, idx_a, 2.0 * mass)
+        Mf_builder.extend_np(idx_a, idx_b, mass)
+        Mf_builder.extend_np(idx_a, idx_c, mass)
+        Mf_builder.extend_np(idx_b, idx_a, mass)
+        Mf_builder.extend_np(idx_b, idx_b, 2.0 * mass)
+        Mf_builder.extend_np(idx_b, idx_c, mass)
+        Mf_builder.extend_np(idx_c, idx_a, mass)
+        Mf_builder.extend_np(idx_c, idx_b, mass)
+        Mf_builder.extend_np(idx_c, idx_c, 2.0 * mass)
+
+        # Cotan stiffness matrix for triangle mesh
+        stiff_a = vertex_stiffness[idx_a]
+        stiff_b = vertex_stiffness[idx_b]
+        cos_ab = np.sum(bc * ca, axis=1)
+        cos_bc = np.sum(ca * ab, axis=1)
+        cos_ca = np.sum(ab * bc, axis=1)
+        cot_ab = np.divide(cos_ab, area, out=np.zeros_like(cos_ab), where=area != 0.0)
+        cot_bc = np.divide(cos_bc, area, out=np.zeros_like(cos_bc), where=area != 0.0)
+        cot_ca = np.divide(cos_ca, area, out=np.zeros_like(cos_ca), where=area != 0.0)
+        stiff_ab = -0.25 * cot_ab * stiff_a * stiff_b
+        stiff_bc = -0.25 * cot_bc * stiff_b * stiff_c
+        stiff_ca = -0.25 * cot_ca * stiff_c * stiff_a
+        Sf_builder.extend_np(idx_a, idx_a, -stiff_ab - stiff_ca)
+        Sf_builder.extend_np(idx_a, idx_b, stiff_ab)
+        Sf_builder.extend_np(idx_a, idx_c, stiff_ca)
+        Sf_builder.extend_np(idx_b, idx_a, stiff_ab)
+        Sf_builder.extend_np(idx_b, idx_b, -stiff_bc - stiff_ab)
+        Sf_builder.extend_np(idx_b, idx_c, stiff_bc)
+        Sf_builder.extend_np(idx_c, idx_a, stiff_ca)
+        Sf_builder.extend_np(idx_c, idx_b, stiff_bc)
+        Sf_builder.extend_np(idx_c, idx_c, -stiff_ca - stiff_bc)
+
+        Af[loop_count:loop_count + numverts] = area
+        idx_g = np.arange(loop_count * 3, (loop_count + numverts) * 3)
+        edgenor_a = -np.cross(normal, bc)
+        edgenor_b = -np.cross(normal, ca)
+        edgenor_c = -np.cross(normal, ab)
+        gradient_a = 0.5 * np.divide(edgenor_a, area[:,None], out=np.zeros_like(edgenor_a), where=area[:,None] != 0.0)
+        gradient_b = 0.5 * np.divide(edgenor_b, area[:,None], out=np.zeros_like(edgenor_b), where=area[:,None] != 0.0)
+        gradient_c = 0.5 * np.divide(edgenor_c, area[:,None], out=np.zeros_like(edgenor_c), where=area[:,None] != 0.0)
+        Gf_builder.extend_np(idx_g, np.repeat(idx_a, 3), gradient_a.flatten())
+        Gf_builder.extend_np(idx_g, np.repeat(idx_b, 3), gradient_b.flatten())
+        Gf_builder.extend_np(idx_g, np.repeat(idx_c, 3), gradient_c.flatten())
+
+    loop_count = 0
+    for face in bm.faces:
+        numverts = len(face.verts)
+        # TODO virtual vertex only needed for polygons, handle triangles with simple cotan
+
+        def X_values():
+            for loop in face.loops:
+                yield from loop.vert.co
+        X = np.fromiter(X_values(), dtype=float, count=numverts * 3).reshape(numverts, 3)
+
+        # Solve minimization problem to determine weights for the virtual vertex.
+        # This computes weights such that the squared area of the fan triangles is minimized.
+        # See the paper for details: Bunge et al., Polygon Laplacian Made Simple
+
+        # Cached cross products
+        def C_values():
+            for iloop in face.loops:
+                for jloop in face.loops:
+                    yield from iloop.vert.co.cross(jloop.vert.co)
+        C = np.fromiter(C_values(), dtype=float, count=numverts * numverts * 3).reshape(numverts, numverts, 3)
+        Cnext = np.roll(C, -1, axis=1)
+
+        def A_values():
+            for i in range(numverts):
+                for j in range(numverts):
+                    yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), 0.0)
+        A = np.fromiter(A_values(), dtype=float, count=numverts * numverts).reshape(numverts, numverts)
+        # Add row of ones to enforce unity
+        A = np.vstack((A, np.ones(numverts)))
+
+        def b_values():
+            for i, iloop in enumerate(face.loops):
+                yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), 0.0)
+        b = np.fromiter(b_values(), dtype=float, count=numverts)
+        # Add row of ones to enforce unity
+        b = np.hstack((b, np.ones(1)))
+
+        # Solve weights
+        w, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
+
+        # Virtual vertex
+        center = w @ X
+        stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), 0.0)
+
+        add_face_laplacian_loopy(bm, face, Vector(center), w, loop_count)
+        # add_face_laplacian_np(bm, face, center, w, loop_count)
 
         loop_count += len(face.verts)
     P = P_builder.construct()
