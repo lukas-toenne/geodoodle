@@ -136,6 +136,12 @@ VectorOutputLayerSettings = _make_output_layer_settings("Vector", 'VECTOR')
 
 
 class GeoDoodleOperatorBase(bpy.types.Operator):
+    debug_method : BoolProperty(
+        name="Debug Method",
+        description="Enable alternative method for comparison",
+        default=False,
+    )
+
     @staticmethod
     def ensure_vgroup(obj, name):
         vg = obj.vertex_groups.get(name, None)
@@ -159,10 +165,23 @@ class GeoDoodleOperatorBase(bpy.types.Operator):
                 depsgraph = context.evaluated_depsgraph_get()
                 bm = bmesh.new()
                 bm.from_object(obj, depsgraph)
+
+                if self.debug_method:
+                    print(">>> Debug method enabled! <<<")
+                geometry_math.DEBUG_METHOD = self.debug_method
+                perf_start = time.perf_counter()
+
                 generator(bm)
+
+                perf_end = time.perf_counter()
+                print("{} computation time: {:0.4f}".format(self.bl_label, perf_end - perf_start))
+                geometry_math.DEBUG_METHOD = False
+
                 bm.to_mesh(obj.data)
                 bm.free()
+
             obj.data.update()
+
         finally:
             bpy.ops.object.mode_set(mode=orig_mode)
 
@@ -171,6 +190,10 @@ class GeoDoodleOperatorBase(bpy.types.Operator):
     def invoke(self, context, event):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "debug_method")
 
 
 class HeatMapOperator(GeoDoodleOperatorBase):
@@ -218,10 +241,7 @@ class HeatMapOperator(GeoDoodleOperatorBase):
         heat_writer = self.heat_output_layers.get_writer(obj)
 
         def apply(bm):
-            perf_start = time.perf_counter()
             geometry_math.compute_heat(bm, source_reader, obstacle_reader, heat_writer, self.heat_time_scale)
-            perf_end = time.perf_counter()
-            print("Heat map computation time: {:0.4f}".format(perf_end - perf_start))
 
         yield apply
 
@@ -234,6 +254,8 @@ class HeatMapOperator(GeoDoodleOperatorBase):
         box = layout.box()
         self.heat_output_layers.draw(context, box, text="Heat Output:")
         box.prop(self, "heat_time_scale")
+
+        super().draw(context)
 
 
 class GeodesicDistanceOperator(GeoDoodleOperatorBase):
@@ -270,17 +292,7 @@ class GeodesicDistanceOperator(GeoDoodleOperatorBase):
         distance_writer = self.distance_output_layers.get_writer(obj)
 
         def apply(bm):
-            perf_start = time.perf_counter()
             geometry_math.compute_distance(bm, source_reader, obstacle_reader, distance_writer)
-            perf_end = time.perf_counter()
-            print("NEW Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
-
-            geometry_math.DEBUG_METHOD = True
-            perf_start = time.perf_counter()
-            geometry_math.compute_distance(bm, source_reader, obstacle_reader, distance_writer)
-            perf_end = time.perf_counter()
-            print("OLD Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
-            geometry_math.DEBUG_METHOD = False
 
         yield apply
 
@@ -292,6 +304,8 @@ class GeodesicDistanceOperator(GeoDoodleOperatorBase):
 
         box = layout.box()
         self.distance_output_layers.draw(context, box, text="Distance Output:")
+
+        super().draw(context)
 
 
 class ParallelTransportOperator(GeoDoodleOperatorBase):
@@ -338,10 +352,7 @@ class ParallelTransportOperator(GeoDoodleOperatorBase):
         vector_writer = self.vector_output_layers.get_writer(obj)
 
         def apply(bm):
-            perf_start = time.perf_counter()
             geometry_math.compute_parallel_transport(bm, vector_reader, obstacle_reader, vector_writer)
-            perf_end = time.perf_counter()
-            print("Parallel transport computation time: {:0.4f}".format(perf_end - perf_start))
 
         yield apply
 
@@ -354,6 +365,8 @@ class ParallelTransportOperator(GeoDoodleOperatorBase):
 
         box = layout.box()
         self.vector_output_layers.draw(context, box, text="Vector Output:")
+
+        super().draw(context)
 
 
 def menu_func(self, context):
