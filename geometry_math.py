@@ -28,7 +28,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
 from dataclasses import dataclass
-from . import surface_vector
+from . import ngon_mesh_refine, surface_vector, triangle_mesh_laplacian
 
 
 DEBUG_METHOD = False
@@ -380,7 +380,7 @@ def compute_laplacian(bm, vertex_stiffness):
 
 
     # TODO virtual vertex only needed for polygons, handle triangles with simple cotan
-    if DEBUG_METHOD:
+    if False: # DEBUG_METHOD:
         print("======== LOOPY: ========")
         center_weights, center_pos = compute_refined_mesh_loopy()
     else:
@@ -406,39 +406,43 @@ def compute_laplacian(bm, vertex_stiffness):
     Mf = Mf_builder.construct()
     Sf = Sf_builder.construct()
     Gf = Gf_builder.construct()
+
+    return P, Af, Mf, Sf, Gf
+
+
+def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
+    if DEBUG_METHOD:
+        vertex_stiffness = 1.0 - obstacle_reader.read_scalar(bm) if obstacle_reader else np.ones(len(bm.verts))
+        P, Af, Mf, Sf, Gf = compute_laplacian(bm, vertex_stiffness)
+    else:
+        vert_pos, triangles, P = ngon_mesh_refine.triangulate_mesh(bm)
+
+        # Build Laplacian
+        vertex_stiffness = P @ (1.0 - obstacle_reader.read_scalar(bm)) if obstacle_reader else np.ones(vert_pos.shape[0])
+        Af, Mf, Sf, Gf = triangle_mesh_laplacian.compute_laplacian(vert_pos, triangles, vertex_stiffness)
+
+    log_matrix(Af, "Af")
     log_matrix(Mf, "Mf")
     log_matrix(Sf, "Sf")
     log_matrix(Gf, "Gf")
+    # print(np.array2string(Gf.todense(), max_line_width=500, threshold=50000))
 
     # Combine into coarse mesh matrices
+    # Diagonalize mass matrix by lumping rows together
     M = P.transpose() @ Mf @ P
+    M = sparse.dia_matrix((M.sum(axis=1).transpose(), 0), M.shape)
     S = P.transpose() @ Sf @ P
+    log_matrix(M, "M")
     log_matrix(S, "S")
 
-    # Diagonalize mass matrix by lumping rows together
-    M = sparse.dia_matrix((M.sum(axis=1).transpose(), 0), M.shape)
-    log_matrix(M, "M")
-
+    # TODO this could be better
     Af = sparse.diags(np.repeat(Af, 3, axis=0), 0)
-    log_matrix(Af, "Af")
     Df = -Gf.transpose() * Af
     log_matrix(Df, "Df")
     G = Gf @ P
     log_matrix(G, "G")
     D = P.transpose() @ Df
     log_matrix(D, "D")
-
-    return M, S, G, D
-
-
-def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
-    numverts = len(bm.verts)
-    bm.verts.index_update()
-    bm.faces.index_update()
-
-    # Build Laplacian
-    vertex_stiffness = 1.0 - obstacle_reader.read_scalar(bm) if obstacle_reader else np.ones(numverts)
-    M, S, G, D = compute_laplacian(bm, vertex_stiffness)
 
     # Mean square edge length is used as a "time step" in heat flow solving.
     t = time_scale * sum(((edge.verts[0].co - edge.verts[1].co).length_squared for edge in bm.edges), 0.0) / len(bm.edges) if bm.edges else 0.0
@@ -447,7 +451,6 @@ def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0
     source = source_reader.read_scalar(bm)
     u = sparse.linalg.spsolve(M - t*S, source)
     log_matrix(u, "u")
-    # print(np.array2string(u, max_line_width=500))
 
     if heat_writer:
         heat_writer.write_scalar(bm, u)

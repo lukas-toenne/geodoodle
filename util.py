@@ -71,6 +71,57 @@ class CooBuilder:
         self.index = 0
 
 
+# Safe division, putting zero when divisor is zero.
+#
+# Parameters
+# ----------
+# a : ndarray
+#   Nominator array or scalar.
+# d
+#   Divisor array or scalar.
+#
+# Returns
+# -------
+# a_div : ndarray of floats
+#   Division result.
+def vector_safe_divide(a, d):
+    return np.divide(a, d, out=np.zeros_like(a), where=d != 0.0)
+
+
+# Length of vectors
+#
+# Parameters
+# ----------
+# a : ndarray of shape (N, 3)
+#   Array of vectors, components in the last dimension.
+#
+# Returns
+# -------
+# a_len : ndarray of floats
+#   Length of vectors in the input array.
+def vector_lengths(a):
+    return np.linalg.norm(a, axis=1)
+
+
+# Normalizes an array of vectors.
+#
+# Parameters
+# ----------
+# a : ndarray of shape (N, 3)
+#   Array of vectors, components in the last dimension.
+#
+# Returns
+# -------
+# a_norm : ndarray like a
+#   Array of normalized vectors, components in the last dimension.
+# a_len : ndarray of floats
+#   Length of vectors in the input array.
+def vector_normalized(a):
+    a_len = vector_lengths(a)
+    a_norm = vector_safe_divide(a, a_len[:,None])
+    return a_norm, a_len
+
+
 def log_matrix(m, name):
     if isinstance(m, np.ndarray):
         size = m.nbytes
