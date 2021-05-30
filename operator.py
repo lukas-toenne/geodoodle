@@ -273,7 +273,14 @@ class GeodesicDistanceOperator(GeoDoodleOperatorBase):
             perf_start = time.perf_counter()
             geometry_math.compute_distance(bm, source_reader, obstacle_reader, distance_writer)
             perf_end = time.perf_counter()
-            print("Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
+            print("NEW Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
+
+            geometry_math.DEBUG_METHOD = True
+            perf_start = time.perf_counter()
+            geometry_math.compute_distance(bm, source_reader, obstacle_reader, distance_writer)
+            perf_end = time.perf_counter()
+            print("OLD Geodesic distance computation time: {:0.4f}".format(perf_end - perf_start))
+            geometry_math.DEBUG_METHOD = False
 
         yield apply
 

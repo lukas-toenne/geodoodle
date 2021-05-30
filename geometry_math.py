@@ -31,6 +31,9 @@ from dataclasses import dataclass
 from . import surface_vector
 
 
+DEBUG_METHOD = False
+
+
 # UNUSED
 # Per-face Laplacian as defined by
 # ALEXA M., WARDETZKY M.: Discrete Laplacians on general polygonal meshes
@@ -99,11 +102,9 @@ def compute_laplacian(bm, vertex_stiffness):
     refinedverts = totverts + totfaces # One virtual vertex added per face
     refinedfaces = totloops # Each face replaced by a triangle fan
 
-    # Elongation matrix P: Maps vertices of the original mesh to vertices of the refined (subdivided) mesh.
-    #   First totverts rows are identity matrix (old verts are part of the refined mesh).
-    #   Lower totfaces rows are weights for constructing a virtual vertex for each face
-    P_builder = CooBuilder(shape=(refinedverts, totverts), entries=totverts+totloops, dtype=float)
-    P_builder.extend(np.arange(totverts, dtype=int), np.arange(totverts, dtype=int), np.ones(totverts, dtype=float))
+    # Weight matrix maps vertex positions to face center vertices.
+    # Forms the lower part of the elongation matrix P.
+    W_builder = CooBuilder(shape=(totfaces, totverts), entries=totloops, dtype=float)
 
     # Face areas for computing divergence from gradient operator
     Af = np.zeros((refinedfaces))
@@ -124,9 +125,10 @@ def compute_laplacian(bm, vertex_stiffness):
     def add_face_laplacian_loopy(bm, face, center, weights, loop_count):
         totverts = len(bm.verts)
 
+        stiff_c = sum(weights * vertex_stiffness, 0.0)
+
         for k, loop in enumerate(face.loops):
             loop_idx = loop_count + k
-            P_builder.append(totverts + face.index, loop.vert.index, weights[k])
 
             idx_a = loop.vert.index
             idx_b = loop.link_loop_next.vert.index
@@ -214,8 +216,6 @@ def compute_laplacian(bm, vertex_stiffness):
         idx_b = np.roll(idx_a, -1)
         idx_c = np.full(numverts, face.index + totverts)
 
-        P_builder.extend(idx_c, idx_a, weights)
-
         loop_verts = np.fromiter((c for loop in face.loops for c in loop.vert.co[:]), dtype=float, count=numverts * 3).reshape(numverts, 3)
         loop_verts_next = np.roll(loop_verts, -1, axis=0)
         ab = loop_verts_next - loop_verts
@@ -242,6 +242,7 @@ def compute_laplacian(bm, vertex_stiffness):
         # Cotan stiffness matrix for triangle mesh
         stiff_a = vertex_stiffness[idx_a]
         stiff_b = vertex_stiffness[idx_b]
+        stiff_c = np.sum(weights * vertex_stiffness)
         cos_ab = np.sum(bc * ca, axis=1)
         cos_bc = np.sum(ca * ab, axis=1)
         cos_ca = np.sum(ab * bc, axis=1)
@@ -273,59 +274,138 @@ def compute_laplacian(bm, vertex_stiffness):
         Gf_builder.extend_np(idx_g, np.repeat(idx_b, 3), gradient_b.flatten())
         Gf_builder.extend_np(idx_g, np.repeat(idx_c, 3), gradient_c.flatten())
 
+
+    # Vertex positions
+    vert_pos = np.fromiter((c for vert in bm.verts for c in vert.co[:]), dtype=float, count=totverts * 3).reshape(-1, 3)
+
+    # Face loop indices
+    loop_idx = np.fromiter((loop.vert.index for face in bm.faces for loop in face.loops), dtype=int, count=totloops)
+    loop_idx_next = np.fromiter((loop.link_loop_next.vert.index for face in bm.faces for loop in face.loops), dtype=int, count=totloops)
+    face_vert_count = np.fromiter((len(face.loops) for face in bm.faces), dtype=int, count=totfaces)
+    face_stop_idx = np.cumsum(face_vert_count)
+    face_start_idx = np.r_[0, face_stop_idx[:-1]]
+
+    # Edge vectors
+    loop_edge = vert_pos[loop_idx_next,:] - vert_pos[loop_idx,:]
+
+    def compute_refined_mesh_loopy():
+        loop_count = 0
+        for face in bm.faces:
+            start_idx = face_start_idx[face.index]
+            stop_idx = face_stop_idx[face.index]
+            numverts = len(face.verts)
+
+            def X_values():
+                for loop in face.loops:
+                    yield from loop.vert.co
+            X = np.fromiter(X_values(), dtype=float, count=numverts * 3).reshape(numverts, 3)
+
+            # Solve minimization problem to determine weights for the virtual vertex.
+            # This computes weights such that the squared area of the fan triangles is minimized.
+            # See the paper for details: Bunge et al., Polygon Laplacian Made Simple
+
+            # Cached cross products
+            def C_values():
+                for iloop in face.loops:
+                    for jloop in face.loops:
+                        yield from iloop.vert.co.cross(jloop.vert.co)
+            C = np.fromiter(C_values(), dtype=float, count=numverts * numverts * 3).reshape(numverts, numverts, 3)
+            Cnext = np.roll(C, -1, axis=1)
+
+            def A_values():
+                for i in range(numverts):
+                    for j in range(numverts):
+                        yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), 0.0)
+            A = np.fromiter(A_values(), dtype=float, count=numverts * numverts).reshape(numverts, numverts)
+            # Add row of ones to enforce unity
+            A = np.vstack((A, np.ones(numverts)))
+
+            def b_values():
+                for i, iloop in enumerate(face.loops):
+                    yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), 0.0)
+            b = np.fromiter(b_values(), dtype=float, count=numverts)
+            # Add row of ones to enforce unity
+            b = np.hstack((b, np.ones(1)))
+
+            # Solve weights
+            weights, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
+
+            # Add entries in the weight matrix: row at face.index contains weights for the face center vertex.
+            W_builder.extend(np.full(numverts, face.index), loop_idx[start_idx:stop_idx], weights)
+
+        # Computes face centers from vertex positions, shape is (totfaces, totverts)
+        center_weights = W_builder.construct()
+
+        # Virtual vertex positions, one per face
+        center_pos = center_weights @ vert_pos
+
+        return center_weights, center_pos
+
+
+    def compute_refined_mesh_np():
+        # Solve minimization problem to determine weights for the virtual center vertex.
+        # This computes weights such that the squared area of the fan triangles is minimized.
+        # See the paper for details: Bunge et al., Polygon Laplacian Made Simple
+        for face in bm.faces:
+            start_idx = face_start_idx[face.index]
+            stop_idx = face_stop_idx[face.index]
+            numverts = face_vert_count[face.index]
+            face_verts = vert_pos[loop_idx[start_idx:stop_idx],:]
+            face_verts_next = vert_pos[loop_idx_next[start_idx:stop_idx],:]
+            edges = face_verts_next - face_verts
+
+            # Per-face weight minimization matrix for computing the virtual center vertex.
+            # Matrix Q is a (n, n, 3) matrix of cross products for each face vertex with each edge vector.
+            # Matrix A describes the surface energy to be minimized.
+            Q = np.cross(face_verts[:,None,:], edges[None,:,:])
+            A = np.einsum("ikl,jkl", Q, Q)
+            b = np.einsum("ikl,kkl", Q, Q)
+            # Add row of ones to enforce unity
+            A = np.vstack((A, np.ones(numverts)))
+            b = np.hstack((b, np.ones(1)))
+
+            # Solve weights
+            weights, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
+
+            # Add entries in the weight matrix: row at face.index contains weights for the face center vertex.
+            W_builder.extend(np.full(numverts, face.index), loop_idx[start_idx:stop_idx], weights)
+
+        # Computes face centers from vertex positions, shape is (totfaces, totverts)
+        center_weights = W_builder.construct()
+
+        # Virtual vertex positions, one per face
+        center_pos = center_weights @ vert_pos
+
+        return center_weights, center_pos
+
+
+    # TODO virtual vertex only needed for polygons, handle triangles with simple cotan
+    if DEBUG_METHOD:
+        print("======== LOOPY: ========")
+        center_weights, center_pos = compute_refined_mesh_loopy()
+    else:
+        print("======== NP: ========")
+        center_weights, center_pos = compute_refined_mesh_np()
+
+
+    # Elongation matrix P: Maps vertices of the original mesh to vertices of the refined (subdivided) mesh.
+    #   First totverts rows are identity matrix (old verts are part of the refined mesh).
+    #   Lower totfaces rows are weights for constructing a virtual vertex for each face
+    P = sparse.vstack((sparse.identity(totverts), center_weights))
+    # print(np.array2string(P.todense(), max_line_width=500, threshold=50000))
+    log_matrix(P, "P")
+
     loop_count = 0
     for face in bm.faces:
         numverts = len(face.verts)
-        # TODO virtual vertex only needed for polygons, handle triangles with simple cotan
 
-        def X_values():
-            for loop in face.loops:
-                yield from loop.vert.co
-        X = np.fromiter(X_values(), dtype=float, count=numverts * 3).reshape(numverts, 3)
-
-        # Solve minimization problem to determine weights for the virtual vertex.
-        # This computes weights such that the squared area of the fan triangles is minimized.
-        # See the paper for details: Bunge et al., Polygon Laplacian Made Simple
-
-        # Cached cross products
-        def C_values():
-            for iloop in face.loops:
-                for jloop in face.loops:
-                    yield from iloop.vert.co.cross(jloop.vert.co)
-        C = np.fromiter(C_values(), dtype=float, count=numverts * numverts * 3).reshape(numverts, numverts, 3)
-        Cnext = np.roll(C, -1, axis=1)
-
-        def A_values():
-            for i in range(numverts):
-                for j in range(numverts):
-                    yield 2.0 * sum((np.dot(Cnext[j, k, :] - C[j, k, :], Cnext[i, k, :] - C[i, k, :]) for k in range(numverts)), 0.0)
-        A = np.fromiter(A_values(), dtype=float, count=numverts * numverts).reshape(numverts, numverts)
-        # Add row of ones to enforce unity
-        A = np.vstack((A, np.ones(numverts)))
-
-        def b_values():
-            for i, iloop in enumerate(face.loops):
-                yield 2.0 * sum((np.dot(Cnext[i, k, :] - C[i, k, :], Cnext[k, k, :]) for k in range(numverts)), 0.0)
-        b = np.fromiter(b_values(), dtype=float, count=numverts)
-        # Add row of ones to enforce unity
-        b = np.hstack((b, np.ones(1)))
-
-        # Solve weights
-        w, res, rank, sing = np.linalg.lstsq(A, b, rcond=None)
-
-        # Virtual vertex
-        center = w @ X
-        stiff_c = sum((w[k] * vertex_stiffness[loop.vert.index] for k, loop in enumerate(face.loops)), 0.0)
-
-        add_face_laplacian_loopy(bm, face, Vector(center), w, loop_count)
-        # add_face_laplacian_np(bm, face, center, w, loop_count)
+        # add_face_laplacian_loopy(bm, face, Vector(center_pos[face.index,:]), center_weights.getrow(face.index), loop_count)
+        add_face_laplacian_np(bm, face, center_pos[face.index,:], center_weights.getrow(face.index), loop_count)
 
         loop_count += len(face.verts)
-    P = P_builder.construct()
     Mf = Mf_builder.construct()
     Sf = Sf_builder.construct()
     Gf = Gf_builder.construct()
-    log_matrix(P, "P")
     log_matrix(Mf, "Mf")
     log_matrix(Sf, "Sf")
     log_matrix(Gf, "Gf")

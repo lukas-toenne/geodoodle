@@ -64,6 +64,12 @@ class CooBuilder:
         self.data[self.index:self.index+count] = data[:]
         self.index += count
 
+    def reset(self):
+        self.rows = np.empty(self.entries, dtype=int)
+        self.cols = np.empty(self.entries, dtype=int)
+        self.data = np.empty(self.entries, dtype=self.data.dtype)
+        self.index = 0
+
 
 def log_matrix(m, name):
     if isinstance(m, np.ndarray):
