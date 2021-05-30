@@ -48,7 +48,7 @@ class VertexGroupWriter:
         assert(array.size == len(bm.verts))
         dvert_lay = bm.verts.layers.deform.verify()
         idx = self.vgroup.index
-        for value, vert in zip(np.nditer(array), bm.verts):
+        for value, vert in zip(np.nditer(array, order='C'), bm.verts):
             dvert = vert[dvert_lay]
             dvert[idx] = value
 
@@ -60,7 +60,7 @@ class UVLayerWriter:
     def write_scalar(self, bm, array):
         assert(array.size == len(bm.verts))
         uv_lay = bm.loops.layers.uv.get(self.uvlayer.name)
-        for value, vert in zip(np.nditer(array), bm.verts):
+        for value, vert in zip(np.nditer(array, order='C'), bm.verts):
             for loop in vert.link_loops:
                 loop[uv_lay].uv = Vector((value, 0.0))
 
@@ -72,7 +72,7 @@ class VertexColorWriter:
     def write_scalar(self, bm, array):
         assert(array.size == len(bm.verts))
         vcol_lay = bm.loops.layers.color.get(self.vcol.name)
-        array_iter = np.nditer(array)
+        array_iter = np.nditer(array, order='C')
         for vert in bm.verts:
             x = next(array_iter)
             y = next(array_iter)
@@ -121,7 +121,7 @@ class DualUVLayerWriter:
         assert(array.size == 3 * len(bm.verts))
         uv_xy_lay = bm.loops.layers.uv.get(self.uvlayer_xy.name)
         uv_z_lay = bm.loops.layers.uv.get(self.uvlayer_z.name)
-        array_iter = np.nditer(array)
+        array_iter = np.nditer(array, order='C')
         for vert in bm.verts:
             x = next(array_iter)
             y = next(array_iter)

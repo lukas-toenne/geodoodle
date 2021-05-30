@@ -196,6 +196,42 @@ class GeoDoodleOperatorBase(bpy.types.Operator):
         layout.prop(self, "debug_method")
 
 
+class MeshRefineOperator(GeoDoodleOperatorBase):
+    """Triangulation operator to visualize mesh refinement."""
+    bl_idname = 'geodoodle.mesh_refine'
+    bl_label = 'Refine Mesh'
+    bl_options = {'UNDO', 'REGISTER'}
+
+    @contextmanager
+    def get_generator(self, obj):
+        from . import ngon_mesh_refine
+        import numpy as np
+
+        def apply(bm):
+            vert_pos, triangles, P = ngon_mesh_refine.triangulate_mesh(bm)
+            # print(vert_pos)
+            # print(triangles)
+            # print(np.array2string(P.todense(), max_line_width=500, threshold=50000))
+
+            bm.clear()
+            vert_iter = np.nditer(vert_pos, order='C')
+            for i in range(vert_pos.shape[0]):
+                x = next(vert_iter)
+                y = next(vert_iter)
+                z = next(vert_iter)
+                bm.verts.new((x, y, z))
+
+            bm.verts.ensure_lookup_table()
+            tri_iter = np.nditer(triangles, order='C')
+            for i in range(triangles.shape[0]):
+                v1 = next(tri_iter)
+                v2 = next(tri_iter)
+                v3 = next(tri_iter)
+                bm.faces.new((bm.verts[v1], bm.verts[v2], bm.verts[v3]))
+
+        yield apply
+
+
 class HeatMapOperator(GeoDoodleOperatorBase):
     """Generate mesh attributes for a heat map."""
     bl_idname = 'geodoodle.heat_map'
@@ -381,6 +417,7 @@ def register():
     bpy.utils.register_class(DistanceOutputLayerSettings)
     bpy.utils.register_class(VectorOutputLayerSettings)
 
+    bpy.utils.register_class(MeshRefineOperator)
     bpy.utils.register_class(HeatMapOperator)
     bpy.utils.register_class(GeodesicDistanceOperator)
     bpy.utils.register_class(ParallelTransportOperator)
@@ -394,6 +431,7 @@ def unregister():
     bpy.utils.unregister_class(DistanceOutputLayerSettings)
     bpy.utils.unregister_class(VectorOutputLayerSettings)
 
+    bpy.utils.unregister_class(MeshRefineOperator)
     bpy.utils.unregister_class(HeatMapOperator)
     bpy.utils.unregister_class(GeodesicDistanceOperator)
     bpy.utils.unregister_class(ParallelTransportOperator)

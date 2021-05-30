@@ -45,7 +45,7 @@ def vertex_neighbors(vert):
 # Returns array of 2 surface vector components and the scalar normal component.
 def project_vectors_on_surface(bm, vectors):
     def values():
-        vec_iter = np.nditer(vectors)
+        vec_iter = np.nditer(vectors, order='C')
         for vert in bm.verts:
             vec = Vector((next(vec_iter), next(vec_iter), next(vec_iter)))
 
@@ -76,9 +76,9 @@ def project_vectors_on_surface(bm, vectors):
 # Offset numbers are scalar values in the vertex normal direction.
 def surface_vectors_to_world(bm, surface_vectors, normal_components):
     def values():
-        real_iter = np.nditer(np.real(surface_vectors))
-        imag_iter = np.nditer(np.imag(surface_vectors))
-        normal_iter = np.nditer(normal_components)
+        real_iter = np.nditer(np.real(surface_vectors), order='C')
+        imag_iter = np.nditer(np.imag(surface_vectors), order='C')
+        normal_iter = np.nditer(normal_components, order='C')
         for vert in bm.verts:
             re = next(real_iter)
             im = next(imag_iter)
@@ -115,8 +115,8 @@ def surface_vectors_to_world(bm, surface_vectors, normal_components):
 #         angles = np.angle(surface_vectors)
 #         lengths = np.absolute(surface_vectors)
 
-#         angle_iter = np.nditer(angles)
-#         length_iter = np.nditer(lengths)
+#         angle_iter = np.nditer(angles, order='C')
+#         length_iter = np.nditer(lengths, order='C')
 #         for vert in bm.verts:
 #             numedges = len(vert.link_edges)
 #             for v in vertex_neighbors(vert):

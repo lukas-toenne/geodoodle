@@ -34,7 +34,7 @@ bl_info = {
 }
 
 import bpy
-from . import util, geometry_math, layers, operator, surface_vector
+from . import util, geometry_math, layers, operator, surface_vector, ngon_mesh_refine, triangle_mesh_laplacian
 
 if "bpy" in locals():
     import importlib
@@ -43,6 +43,8 @@ if "bpy" in locals():
     importlib.reload(layers)
     importlib.reload(operator)
     importlib.reload(surface_vector)
+    importlib.reload(ngon_mesh_refine)
+    importlib.reload(triangle_mesh_laplacian)
 
 
 scipy_found = False
