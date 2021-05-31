@@ -37,9 +37,8 @@ def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0
     trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
 
     # Optional obstacle factors
-    obstacle = obstacle_reader.read_scalar(bm) if obstacle_reader else np.zeros(len(bm.verts))
-    vertex_stiffness = P @ (1.0 - obstacle)
-    # vertex_stiffness = np.ones(trimesh.verts.shape[0])
+    obstacle = obstacle_reader.read_scalar(bm) if obstacle_reader else None
+    vertex_stiffness = P @ (1.0 - obstacle) if obstacle else np.ones(trimesh.verts.shape[0])
     # print(np.array2string(vertex_stiffness, max_line_width=500, threshold=50000))
 
     # Build Laplacian
