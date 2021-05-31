@@ -27,7 +27,7 @@ from .util import *
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
-from . import ngon_mesh_refine, surface_vector, triangle_mesh_laplacian
+from . import ngon_mesh_refine, surface_vector, triangle_mesh
 
 
 DEBUG_METHOD = False
@@ -36,35 +36,37 @@ DEBUG_METHOD = False
 def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
     trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
 
+    trimesh.measure_triangles()
+    log_matrix(trimesh.area, "Af")
+
     # Optional obstacle factors
     obstacle = obstacle_reader.read_scalar(bm) if obstacle_reader else None
     vertex_stiffness = P @ (1.0 - obstacle) if obstacle else np.ones(trimesh.verts.shape[0])
     # print(np.array2string(vertex_stiffness, max_line_width=500, threshold=50000))
 
     # Build Laplacian
-    Af, Mf, Sf, Gf = triangle_mesh_laplacian.compute_laplacian(trimesh, vertex_stiffness)
+    trimesh.compute_laplacian(vertex_stiffness)
+    log_matrix(trimesh.mass, "Mf")
+    log_matrix(trimesh.stiffness, "Sf")
 
-    log_matrix(Af, "Af")
-    log_matrix(Mf, "Mf")
-    log_matrix(Sf, "Sf")
-    log_matrix(Gf, "Gf")
+    trimesh.compute_gradient()
+    log_matrix(trimesh.gradient, "Gf")
+    trimesh.compute_divergence()
+    log_matrix(trimesh.divergence, "Df")
+
     # print(np.array2string(Gf.todense(), max_line_width=500, threshold=50000))
 
     # Combine into coarse mesh matrices
     # Diagonalize mass matrix by lumping rows together
-    M = P.transpose() @ Mf @ P
+    M = P.transpose() @ trimesh.mass @ P
     M = sparse.dia_matrix((M.sum(axis=1).transpose(), 0), M.shape)
-    S = P.transpose() @ Sf @ P
+    S = P.transpose() @ trimesh.stiffness @ P
     log_matrix(M, "M")
     log_matrix(S, "S")
 
-    # TODO this could be better
-    Af = sparse.diags(np.repeat(Af, 3, axis=0), 0)
-    Df = -Gf.transpose() * Af
-    log_matrix(Df, "Df")
-    G = Gf @ P
+    G = trimesh.gradient @ P
     log_matrix(G, "G")
-    D = P.transpose() @ Df
+    D = P.transpose() @ trimesh.divergence
     log_matrix(D, "D")
 
     # Mean square edge length is used as a "time step" in heat flow solving.
