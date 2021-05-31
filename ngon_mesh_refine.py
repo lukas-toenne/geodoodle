@@ -24,9 +24,11 @@ import bpy
 from math import sqrt, cos, sin, pi, atan2
 from mathutils import Vector
 from .util import *
+from .triangle_mesh import TriangleMesh
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
+from dataclasses import dataclass
 
 
 # Triangulate a mesh by generating internal triangles for ngons.
@@ -47,11 +49,8 @@ from scipy.sparse import linalg
 #
 # Returns
 # -------
-# verts : ndarray of shape (V + F, 3) and type float
-#   Triangulated vertex positions. First V vectors are original vertices, followed by F vectors at face centers.
-# triangles : ndarray of shape (T, 3) and type int
-#   Index triplets defining triangles of the output mesh.
-#   Number of triangles T depends on topology of the input mesh: Triangles remain triangles, while ngons are turned into triangle fans.
+# trimesh : TriangleMesh 
+#   Data class that stores vertex positions and triangles of the refined mesh.
 # P : ndarray of shape (V + F, V) and type float
 #   Elongation matrix that maps original vertices to refined mesh vertices.
 def triangulate_mesh(bm):
@@ -129,4 +128,5 @@ def triangulate_mesh(bm):
     # - 2nd and 3rd index are the original loop vertices
     new_triangles = np.column_stack((loop_face_idx + totverts, loop_idx, loop_idx_next))
 
-    return new_vert_pos, new_triangles, P
+    trimesh = TriangleMesh(new_vert_pos, new_triangles)
+    return trimesh, P

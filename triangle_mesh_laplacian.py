@@ -24,6 +24,7 @@ import bpy
 from math import sqrt, cos, sin, pi, atan2
 from mathutils import Vector
 from .util import *
+from .triangle_mesh import TriangleMesh
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
@@ -57,7 +58,9 @@ from scipy.sparse import linalg
 #   Stiffness matrix representing heat propagation speed along edges.
 # G : spmatrix of shape (V * 3, V) and type float
 #   Gradient matrix for computing the gradient of a scalar field on vertices.
-def compute_laplacian(verts : np.ndarray, triangles : np.ndarray, vertex_stiffness : np.ndarray):
+def compute_laplacian(trimesh : TriangleMesh, vertex_stiffness : np.ndarray):
+    verts = trimesh.verts
+    triangles = trimesh.triangles
     numverts = verts.shape[0]
     numtris = triangles.shape[0]
 

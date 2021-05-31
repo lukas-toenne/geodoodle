@@ -27,7 +27,6 @@ from .util import *
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
-from dataclasses import dataclass
 from . import ngon_mesh_refine, surface_vector, triangle_mesh_laplacian
 
 
@@ -35,11 +34,16 @@ DEBUG_METHOD = False
 
 
 def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
-    vert_pos, triangles, P = ngon_mesh_refine.triangulate_mesh(bm)
+    trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
+
+    # Optional obstacle factors
+    obstacle = obstacle_reader.read_scalar(bm) if obstacle_reader else np.zeros(len(bm.verts))
+    vertex_stiffness = P @ (1.0 - obstacle)
+    # vertex_stiffness = np.ones(trimesh.verts.shape[0])
+    # print(np.array2string(vertex_stiffness, max_line_width=500, threshold=50000))
 
     # Build Laplacian
-    vertex_stiffness = P @ (1.0 - obstacle_reader.read_scalar(bm)) if obstacle_reader else np.ones(vert_pos.shape[0])
-    Af, Mf, Sf, Gf = triangle_mesh_laplacian.compute_laplacian(vert_pos, triangles, vertex_stiffness)
+    Af, Mf, Sf, Gf = triangle_mesh_laplacian.compute_laplacian(trimesh, vertex_stiffness)
 
     log_matrix(Af, "Af")
     log_matrix(Mf, "Mf")
