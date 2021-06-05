@@ -70,9 +70,42 @@ class TriangleMesh:
     # Stiffness matrix, representing heat propagation speed along edges
     stiffness : sparse.spmatrix = None
 
+    # ndarray of size T * 3 and type int
+    # Vertex indices making up loops around a center vertex.
+    # Loop for a vertex i is given by start/end indices:
+    #   loop_verts[loop_start[i]:loop_end[i]]
+    loop_verts : np.ndarray = None
+    # ndarray of size V and type int
+    # Start index of the loop around each vertex.
+    loop_start : np.ndarray = None
+    # ndarray of size V and type int
+    # Stop index of the loop around each vertex.
+    loop_stop : np.ndarray = None
+
+    # Data type for adjacency array.
+    # Prev/Next vertex index encoded in a single 64 bit integer.
+    adjacency_dtype = np.dtype((np.int64, {'prev':(np.int32, 0),'next':(np.int32, 4)}))
+    # spmatrix of shape (V, V) and type adjacency_dtype
+    # Prev/Next neighborhood vertex indices for radial edges.
+    # If a vertex i has an edge to vertex j, then adjacency[i, j].prev contains the previous vertex index
+    # in the neighborhood loop and adjacency[i, j].next contains the next vertex.
+    # Indices are 1-based to distinguish from empty sparse matrix elements.
+    # If the prev or next neighborhood index is 0 then edge (i,j) is a boundary edge.
+    adjacency : sparse.spmatrix = None
+
+    # ndarray of shape (T, 3) and type float
+    # Radial angle minimum for each triangle corner.
+    radial_angle_min : np.ndarray = None
+    # ndarray of shape (T, 3) and type float
+    # Radial angle maximum for each triangle corner.
+    radial_angle_max : np.ndarray = None
+
 
     # Computes area and normal for each triangle as well as interior angles.
     def measure_triangles(self):
+        if self.area is not None:
+            return
+
         idx_a = self.triangles[:,0]
         idx_b = self.triangles[:,1]
         idx_c = self.triangles[:,2]
@@ -100,6 +133,9 @@ class TriangleMesh:
 
     # Computes a gradient operator for the triangle mesh.
     def compute_gradient(self):
+        if self.gradient is not None:
+            return
+
         numverts = self.verts.shape[0]
         numtris = self.triangles.shape[0]
 
@@ -148,6 +184,9 @@ class TriangleMesh:
 
     # Computes a divergence operator D from the gradient and triangle areas.
     def compute_divergence(self):
+        if self.divergence is not None:
+            return
+
         # TODO this could be better
         A = sparse.diags(np.repeat(self.area, 3, axis=0), 0)
         self.divergence = -self.gradient.T * A
@@ -162,6 +201,9 @@ class TriangleMesh:
     # vertex_stiffness : ndarray of size V and type float
     #   Stiffness factor per vertex.
     def compute_laplacian(self, vertex_stiffness : np.ndarray):
+        if self.mass is not None:
+            return
+
         numverts = self.verts.shape[0]
         numtris = self.triangles.shape[0]
 
@@ -192,3 +234,67 @@ class TriangleMesh:
         S_cols = np.r_[idx_a,  idx_b,  idx_c,  idx_a,  idx_b,  idx_c,  idx_a,  idx_b,  idx_c]
         S_data = np.r_[-stiff_c - stiff_b, stiff_c, stiff_b, stiff_c, -stiff_a - stiff_c, stiff_a, stiff_b, stiff_a, -stiff_b - stiff_a]
         self.stiffness = sparse.coo_matrix((S_data, (S_rows, S_cols)), shape=(numverts, numverts))
+
+
+    # Compute adjacency matrix and neighborhood loops.
+    def compute_neighborhood(self):
+        if self.adjacency is not None:
+            return
+
+        numverts = self.verts.shape[0]
+        numcorners = self.triangles.size
+
+        # Defines loop adjacency for each vertex. For a vertex j in neighborhood around vertex i:
+        #   adj_next[i, j] = vertex after j
+        #   adj_prev[i, j] = vertex before j
+        # Entries for non-neighborhood vertices are empty/zero and must be regarded as undefined.
+        corners = self.triangles.flatten()
+        corners_prev = np.roll(self.triangles, 1, axis=1).flatten()
+        corners_next = np.roll(self.triangles, -1, axis=1).flatten()
+        # Note: Data elements for interior edges are duplicates, with one triangle providing the "prev" vertex
+        # and another triangle providing the "next" vertex.
+        # These entries are added up by the coo_matrix constructor, forming full 64 bit integers for interior edges.
+        self.adjacency = sparse.coo_matrix((np.r_[corners_next.astype(np.int64) + 1, np.left_shift(corners_prev.astype(np.int64) + 1, 32)], (np.r_[corners, corners], np.r_[corners_prev, corners_next])), shape=(numverts, numverts)).tocsr()
+
+        # Number of entries per row is the actual neighborhood size, including boundary edges.
+        loop_count = self.adjacency.indptr[1:] - self.adjacency.indptr[:-1]
+        self.loop_end = np.cumsum(loop_count)
+        self.loop_start = np.r_[0, self.loop_end[:-1]]
+        # Allocate final list of neighborhood vertices, filled in below.
+        self.loop_verts = np.empty(self.loop_end[-1], dtype=int)
+
+        # -1 indicates an uninitialized loop vertex ()
+        adj_indptr = self.adjacency.indptr
+        adj_indices = self.adjacency.indices
+        adj_prev = np.bitwise_and(self.adjacency.data, 0xffffffff)
+        adj_next = np.right_shift(self.adjacency.data, 32)
+        for i in range(numverts):
+            # "Seed" the loops: set an arbitrary start vertex,
+            # or the starting boundary vertex if the loop has a boundary.
+            start_vert = -1
+            for j in range(adj_indptr[i], adj_indptr[i + 1]):
+                if adj_prev[j] == 0:
+                    # Use boundary vertex as start
+                    start_vert = adj_indices[j]
+                    break
+                if start_vert < 0:
+                    start_vert = adj_indices[j]
+
+            # Build neighborhood loops by traversing the adjacency matrix row for this vertex.
+            cur_vert = start_vert
+            for loop_idx in range(self.loop_start[i], self.loop_end[i]):
+                self.loop_verts[loop_idx] = cur_vert
+
+                # Loop up next neighbor.
+                data = self.adjacency[i, cur_vert]
+                cur_vert = (data >> 32) - 1
+                # Stop when encountering boundary or closing the loop.
+                if cur_vert < 0 or cur_vert == start_vert:
+                    break
+
+
+    # Compute the scaled radial angles that define local surface vector mapping.
+    def compute_radial_angles(self):
+        numverts = self.verts.shape[0]
+        numtris = self.triangles.shape[0]
+

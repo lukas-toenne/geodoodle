@@ -208,22 +208,20 @@ class MeshRefineOperator(GeoDoodleOperatorBase):
         import numpy as np
 
         def apply(bm):
-            vert_pos, triangles, P = ngon_mesh_refine.triangulate_mesh(bm)
-            # print(vert_pos)
-            # print(triangles)
+            trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
             # print(np.array2string(P.todense(), max_line_width=500, threshold=50000))
 
             bm.clear()
-            vert_iter = np.nditer(vert_pos, order='C')
-            for i in range(vert_pos.shape[0]):
+            vert_iter = np.nditer(trimesh.verts, order='C')
+            for i in range(trimesh.verts.shape[0]):
                 x = next(vert_iter)
                 y = next(vert_iter)
                 z = next(vert_iter)
                 bm.verts.new((x, y, z))
 
             bm.verts.ensure_lookup_table()
-            tri_iter = np.nditer(triangles, order='C')
-            for i in range(triangles.shape[0]):
+            tri_iter = np.nditer(trimesh.triangles, order='C')
+            for i in range(trimesh.triangles.shape[0]):
                 v1 = next(tri_iter)
                 v2 = next(tri_iter)
                 v3 = next(tri_iter)

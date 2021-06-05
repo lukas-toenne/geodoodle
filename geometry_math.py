@@ -35,9 +35,7 @@ DEBUG_METHOD = False
 
 def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0):
     trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
-
     trimesh.measure_triangles()
-    log_matrix(trimesh.area, "Af")
 
     # Optional obstacle factors
     obstacle = obstacle_reader.read_scalar(bm) if obstacle_reader else None
@@ -46,27 +44,27 @@ def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0
 
     # Build Laplacian
     trimesh.compute_laplacian(vertex_stiffness)
-    log_matrix(trimesh.mass, "Mf")
-    log_matrix(trimesh.stiffness, "Sf")
 
     trimesh.compute_gradient()
-    log_matrix(trimesh.gradient, "Gf")
     trimesh.compute_divergence()
-    log_matrix(trimesh.divergence, "Df")
 
-    # print(np.array2string(Gf.todense(), max_line_width=500, threshold=50000))
+    log_matrix(trimesh.area, "Af")
+    log_matrix(trimesh.mass, "Mf")
+    log_matrix(trimesh.stiffness, "Sf")
+    log_matrix(trimesh.gradient, "Gf")
+    log_matrix(trimesh.divergence, "Df")
 
     # Combine into coarse mesh matrices
     # Diagonalize mass matrix by lumping rows together
     M = P.transpose() @ trimesh.mass @ P
     M = sparse.dia_matrix((M.sum(axis=1).transpose(), 0), M.shape)
     S = P.transpose() @ trimesh.stiffness @ P
+    G = trimesh.gradient @ P
+    D = P.transpose() @ trimesh.divergence
+
     log_matrix(M, "M")
     log_matrix(S, "S")
-
-    G = trimesh.gradient @ P
     log_matrix(G, "G")
-    D = P.transpose() @ trimesh.divergence
     log_matrix(D, "D")
 
     # Mean square edge length is used as a "time step" in heat flow solving.
@@ -75,6 +73,7 @@ def compute_heat(bm, source_reader, obstacle_reader, heat_writer, time_scale=1.0
     # Solve the heat equation: (M - t*S) * u = b
     source = source_reader.read_scalar(bm)
     u = sparse.linalg.spsolve(M - t*S, source)
+
     log_matrix(u, "u")
 
     if heat_writer:
@@ -104,12 +103,15 @@ def compute_distance(bm, source_reader, obstacle_reader, distance_writer):
 
 
 def compute_parallel_transport(bm, source_reader, obstacle_reader, vector_writer):
-    totverts = len(bm.verts)
+    trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
+    trimesh.measure_triangles()
+    trimesh.compute_neighborhood()
+    # print(np.array2string(trimesh.adj_next.todense(), max_line_width=500, threshold=50000))
 
     source = source_reader.read_vector(bm)
 
     vsurf, vnormal = surface_vector.project_vectors_on_surface(bm, source)
-    # vsurf = np.full(totverts, 0.255 + 1.63j, dtype=complex)
+    # vsurf = np.full(len(bm.verts), 0.255 + 1.63j, dtype=complex)
 
     world_vectors = surface_vector.surface_vectors_to_world(bm, vsurf, np.zeros_like(vnormal))
 

@@ -122,6 +122,29 @@ def vector_normalized(a):
     return a_norm, a_len
 
 
+# Cumulative sum of rows in a sparse matrix.
+# Based on https://www.debugcn.com/en/article/101824839.html
+#
+# Parameters
+# ----------
+# a : spmatrix, preferably csr_matrix
+#   Sparse matrix whose rows will be summed up.
+#
+# Returns
+# -------
+# r : spmatrix like a
+#   Sparse matrix where elements are the cumulative sum over rows of a.
+def sparse_cumsum(a):
+    r = a.copy()
+    indptr = r.indptr
+    data = r.data
+    for i in range(r.shape[0]):
+        st = indptr[i]
+        en = indptr[i + 1]
+        np.cumsum(data[st:en], out=data[st:en])
+    return r
+
+
 def log_matrix(m, name):
     if isinstance(m, np.ndarray):
         size = m.nbytes
