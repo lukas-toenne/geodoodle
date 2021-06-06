@@ -70,28 +70,22 @@ class TriangleMesh:
     # Stiffness matrix, representing heat propagation speed along edges
     stiffness : sparse.spmatrix = None
 
-    # ndarray of size T * 3 and type int
+    # ndarray size sum(loop_counts), i.e. T * 3 or greater if there are boundaries, and type int
     # Vertex indices making up loops around a center vertex.
-    # Loop for a vertex i is given by start/end indices:
-    #   loop_verts[loop_start[i]:loop_end[i]]
+    # Loop for a vertex i is given by loop_verts_index:
+    #   loop_verts[loop_verts_index[i]:loop_verts_index[i+1]]
     loop_verts : np.ndarray = None
-    # ndarray of size V and type int
+    # ndarray of size V + 1 and type int
     # Start index of the loop around each vertex.
-    loop_start : np.ndarray = None
-    # ndarray of size V and type int
-    # Stop index of the loop around each vertex.
-    loop_stop : np.ndarray = None
-
-    # Data type for adjacency array.
-    # Prev/Next vertex index encoded in a single 64 bit integer.
-    adjacency_dtype = np.dtype((np.int64, {'prev':(np.int32, 0),'next':(np.int32, 4)}))
-    # spmatrix of shape (V, V) and type adjacency_dtype
-    # Prev/Next neighborhood vertex indices for radial edges.
-    # If a vertex i has an edge to vertex j, then adjacency[i, j].prev contains the previous vertex index
-    # in the neighborhood loop and adjacency[i, j].next contains the next vertex.
-    # Indices are 1-based to distinguish from empty sparse matrix elements.
-    # If the prev or next neighborhood index is 0 then edge (i,j) is a boundary edge.
-    adjacency : sparse.spmatrix = None
+    loop_verts_index : np.ndarray = None
+    # ndarray of size T * 3 and type int
+    # Corner indices making up loops around a center vertex.
+    # Loop for a vertex i is given by loop_corner_index:
+    #   loop_corners[loop_corners_index[i]:loop_corners_index[i+1]]
+    loop_corners : np.ndarray = None
+    # ndarray of size V + 1 and type int
+    # Start index of the loop around each vertex.
+    loop_corners_index : np.ndarray = None
 
     # ndarray of shape (T, 3) and type float
     # Radial angle minimum for each triangle corner.
@@ -238,39 +232,61 @@ class TriangleMesh:
 
     # Compute adjacency matrix and neighborhood loops.
     def compute_neighborhood(self):
-        if self.adjacency is not None:
+        if self.loop_verts is not None:
             return
 
         numverts = self.verts.shape[0]
+        numtriangles = self.triangles.shape[0]
         numcorners = self.triangles.size
 
-        # Defines loop adjacency for each vertex. For a vertex j in neighborhood around vertex i:
-        #   adj_next[i, j] = vertex after j
-        #   adj_prev[i, j] = vertex before j
+        # Defines adjacency for each edge.
+        # For an edge from vertex i to vertex j the matrix contains next/prev corners:
+        #   adjacency[i, j] = (previous corner) | (next corner) << 32
         # Entries for non-neighborhood vertices are empty/zero and must be regarded as undefined.
-        corners = self.triangles.flatten()
-        corners_prev = np.roll(self.triangles, 1, axis=1).flatten()
-        corners_next = np.roll(self.triangles, -1, axis=1).flatten()
-        # Note: Data elements for interior edges are duplicates, with one triangle providing the "prev" vertex
-        # and another triangle providing the "next" vertex.
-        # These entries are added up by the coo_matrix constructor, forming full 64 bit integers for interior edges.
-        self.adjacency = sparse.coo_matrix((np.r_[corners_next.astype(np.int64) + 1, np.left_shift(corners_prev.astype(np.int64) + 1, 32)], (np.r_[corners, corners], np.r_[corners_prev, corners_next])), shape=(numverts, numverts)).tocsr()
+        cornerverts = self.triangles.flatten()
+        cornerverts_prev = np.roll(self.triangles, 1, axis=1).flatten()
+        cornerverts_next = np.roll(self.triangles, -1, axis=1).flatten()
+        # Rows twice, one set of entries for "prev", another for "next"
+        # These entries are added up by the coo_matrix constructor, so interior edges have both prev and next.
+        adj_rows = np.tile(cornerverts, 2)
+        adj_cols = np.r_[cornerverts_prev, cornerverts_next]
+        # A triangle defines the "prev" corner of edge (i-1, i) and the "next" corner of edge (i, i+1).
+        #
+        #   i-1       i+1
+        #    \       /
+        #     \     /
+        #      \ c /
+        #       \ /
+        #        i
+        #
+        corners = (np.arange(0, numtriangles * 3, 3, dtype=np.int64)[:, None] + np.array([0, 1, 2], dtype=np.int64)[None, :]).flatten()
+        adj_data = np.r_[corners + 1, np.left_shift(corners + 1, 32)]
+        adjacency = sparse.coo_matrix((adj_data, (adj_rows, adj_cols)), shape=(numverts, numverts))
 
-        # Number of entries per row is the actual neighborhood size, including boundary edges.
-        loop_count = self.adjacency.indptr[1:] - self.adjacency.indptr[:-1]
-        self.loop_end = np.cumsum(loop_count)
-        self.loop_start = np.r_[0, self.loop_end[:-1]]
+        # Make both compressed-sparse-row and dictionary-of-keys matrices.
+        # csr for counting non-zero elements and finding the start vertex.
+        # dok for fast lookups when ordering corners.
+        adjacency_csr = adjacency.tocsr()
+        adjacency_dok = adjacency.todok()
+
+        # Number of entries per row is size of neighborhood vertices, including boundary edges.
+        loop_verts_count = adjacency_csr.getnnz(axis=0)
+        loop_corners_count = np.zeros(numverts, dtype=int)
+        for corner in np.nditer(cornerverts):
+            loop_corners_count[corner] += 1
         # Allocate final list of neighborhood vertices, filled in below.
-        self.loop_verts = np.empty(self.loop_end[-1], dtype=int)
+        self.loop_verts_index = np.r_[0, np.cumsum(loop_verts_count)]
+        self.loop_corners_index = np.r_[0, np.cumsum(loop_corners_count)]
+        self.loop_verts = np.empty(self.loop_verts_index[-1], dtype=int)
+        self.loop_corners = np.empty(self.loop_corners_index[-1], dtype=int)
 
         # -1 indicates an uninitialized loop vertex ()
-        adj_indptr = self.adjacency.indptr
-        adj_indices = self.adjacency.indices
-        adj_prev = np.bitwise_and(self.adjacency.data, 0xffffffff)
-        adj_next = np.right_shift(self.adjacency.data, 32)
+        adj_indptr = adjacency_csr.indptr
+        adj_indices = adjacency_csr.indices
+        adj_prev = np.bitwise_and(adjacency_csr.data, 0xffffffff)
+        adj_next = np.right_shift(adjacency_csr.data, 32)
         for i in range(numverts):
-            # "Seed" the loops: set an arbitrary start vertex,
-            # or the starting boundary vertex if the loop has a boundary.
+            # "Seed" the loops: find boundary or use an arbitrary vertex if the loop is closed.
             start_vert = -1
             for j in range(adj_indptr[i], adj_indptr[i + 1]):
                 if adj_prev[j] == 0:
@@ -279,17 +295,26 @@ class TriangleMesh:
                     break
                 if start_vert < 0:
                     start_vert = adj_indices[j]
+            if start_vert < 0:
+                continue
 
             # Build neighborhood loops by traversing the adjacency matrix row for this vertex.
             cur_vert = start_vert
-            for loop_idx in range(self.loop_start[i], self.loop_end[i]):
+            for loop_idx in range(self.loop_corners_index[i], self.loop_corners_index[i + 1]):
                 self.loop_verts[loop_idx] = cur_vert
 
                 # Loop up next neighbor.
-                data = self.adjacency[i, cur_vert]
-                cur_vert = (data >> 32) - 1
-                # Stop when encountering boundary or closing the loop.
-                if cur_vert < 0 or cur_vert == start_vert:
+                data = adjacency_dok[i, cur_vert]
+                corner = (data >> 32) - 1
+                if corner < 0:
+                    # Stop when hitting boundary
+                    break
+                self.loop_corners[corner]
+
+                # Note: cornerverts_prev refers to ordering in the triangle, the "prev" triangle vertex is "next" for the vertex fan!
+                cur_vert = cornerverts_prev[corner]
+                if cur_vert == start_vert:
+                    # Stop when closing the loop.
                     break
 
 
