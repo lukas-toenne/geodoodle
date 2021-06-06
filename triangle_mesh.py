@@ -24,6 +24,10 @@ import numpy as np
 from scipy import sparse
 from dataclasses import dataclass, field
 from .util import *
+from math import pi
+
+
+tau = 2.0 * pi
 
 
 # Mesh structure with triangles in numpy arrays.
@@ -69,6 +73,11 @@ class TriangleMesh:
     # spmatrix of shape (V, V) and type float
     # Stiffness matrix, representing heat propagation speed along edges
     stiffness : sparse.spmatrix = None
+
+    # ndarray of size V and type bool
+    # True for vertices that are part of a boundary,
+    # i.e. two adjacent edges are part of only one triangle.
+    boundary : np.ndarray = None
 
     # ndarray size sum(loop_counts), i.e. T * 3 or greater if there are boundaries, and type int
     # Vertex indices making up loops around a center vertex.
@@ -285,6 +294,8 @@ class TriangleMesh:
         adj_indices = adjacency_csr.indices
         adj_prev = np.bitwise_and(adjacency_csr.data, 0xffffffff)
         adj_next = np.right_shift(adjacency_csr.data, 32)
+        # Also determine boundary verts in this loop
+        self.boundary = np.full(numverts, False)
         for i in range(numverts):
             # "Seed" the loops: find boundary or use an arbitrary vertex if the loop is closed.
             start_vert = -1
@@ -292,6 +303,7 @@ class TriangleMesh:
                 if adj_prev[j] == 0:
                     # Use boundary vertex as start
                     start_vert = adj_indices[j]
+                    self.boundary[i] = True
                     break
                 if start_vert < 0:
                     start_vert = adj_indices[j]
@@ -309,7 +321,7 @@ class TriangleMesh:
                 if corner < 0:
                     # Stop when hitting boundary
                     break
-                self.loop_corners[corner]
+                self.loop_corners[corner] = corner
 
                 # Note: cornerverts_prev refers to ordering in the triangle, the "prev" triangle vertex is "next" for the vertex fan!
                 cur_vert = cornerverts_prev[corner]
@@ -320,6 +332,28 @@ class TriangleMesh:
 
     # Compute the scaled radial angles that define local surface vector mapping.
     def compute_radial_angles(self):
+        if self.radial_angle_min is not None:
+            return
+
         numverts = self.verts.shape[0]
         numtris = self.triangles.shape[0]
+        numcorners = self.triangles.size
 
+        self.radial_angle_min = np.empty(numcorners, dtype=float)
+        self.radial_angle_max = np.empty(numcorners, dtype=float)
+
+        corner_angle = self.angle.flatten()
+        for i in range(numverts):
+            loop_start = self.loop_corners_index[i]
+            loop_stop = self.loop_corners_index[i + 1]
+            corners = self.loop_corners[loop_start:loop_stop]
+            angles = corner_angle[corners]
+
+            totangle = np.sum(angles)
+            angle_scale = tau / totangle if totangle > tau or not self.boundary[i] else 1.0
+
+            anglesum = 0.0
+            for cor, ang in zip(corners, angles):
+                self.radial_angle_min[cor] = anglesum
+                anglesum += ang * angle_scale
+                self.radial_angle_max[cor] = anglesum

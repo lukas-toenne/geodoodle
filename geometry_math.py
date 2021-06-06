@@ -106,6 +106,7 @@ def compute_parallel_transport(bm, source_reader, obstacle_reader, vector_writer
     trimesh, P = ngon_mesh_refine.triangulate_mesh(bm)
     trimesh.measure_triangles()
     trimesh.compute_neighborhood()
+    trimesh.compute_radial_angles()
     # print(np.array2string(trimesh.adj_next.todense(), max_line_width=500, threshold=50000))
 
     source = source_reader.read_vector(bm)
